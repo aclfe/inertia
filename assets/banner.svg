@@ -1,0 +1,39 @@
+<svg width="1200" height="300" viewBox="0 0 1200 300" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="INERTIA - a terminal physics sandbox">
+  <defs>
+    <linearGradient id="card-bg" x1="0" y1="0" x2="1200" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#121821"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#a5d6ff"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#2d333b"/>
+    </pattern>
+    <clipPath id="card">
+      <rect x="8" y="8" width="1184" height="284" rx="18"/>
+    </clipPath>
+  </defs>
+
+  <!-- card -->
+  <rect x="8" y="8" width="1184" height="284" rx="18" fill="url(#card-bg)" stroke="#21262d" stroke-width="1.5"/>
+  <!-- even dot texture -->
+  <rect x="8" y="8" width="1184" height="284" fill="url(#dots)" opacity="0.55" clip-path="url(#card)"/>
+
+  <!-- three-body figure-eight, kept clear of the text -->
+  <g transform="translate(1000,150)">
+    <path d="M -72 0 C -72 -36, -24 -36, 0 0 C 24 36, 72 36, 72 0 C 72 -36, 24 -36, 0 0 C -24 36, -72 36, -72 0 Z"
+          fill="none" stroke="#3fb950" stroke-width="1.8" opacity="0.75" stroke-linecap="round"/>
+    <circle cx="-72" cy="0" r="5.5" fill="#f0883e"/>
+    <circle cx="72"  cy="0" r="5.5" fill="#58a6ff"/>
+    <circle cx="0"   cy="0" r="5.5" fill="#ffffff"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="60" y="172" font-family="ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace" font-size="112" font-weight="800" letter-spacing="10" fill="url(#word)">INERTIA</text>
+
+  <!-- subtitle + tagline, nothing drawn behind them -->
+  <text x="66" y="216" font-family="ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace" font-size="22" letter-spacing="2" fill="#8b949e">a terminal physics sandbox</text>
+  <text x="66" y="247" font-family="ui-monospace, 'SF Mono', 'Menlo', 'Consolas', monospace" font-size="15" letter-spacing="1" fill="#6e7681">no gpu</text>
+</svg>
