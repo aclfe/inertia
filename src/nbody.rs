@@ -223,7 +223,15 @@ mod tests {
         let bh = barnes_hut(&one, G, SOFT2, 0.5);
         let bf = brute_force(&one, G, SOFT2);
         assert_eq!(bh.len(), 1);
-        assert!(bh[0].norm() < 1e-12, "single body felt a force: {:?}", bh[0]);
-        assert!(bf[0].norm() < 1e-12, "single body felt a force: {:?}", bf[0]);
+        assert!(
+            bh[0].norm() < 1e-12,
+            "single body felt a force: {:?}",
+            bh[0]
+        );
+        assert!(
+            bf[0].norm() < 1e-12,
+            "single body felt a force: {:?}",
+            bf[0]
+        );
     }
 }

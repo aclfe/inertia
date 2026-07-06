@@ -615,7 +615,11 @@ mod tests {
             assert!(seen.insert(t), "next() repeated a variant early: {t:?}");
             t = t.next();
         }
-        assert_eq!(t, Tunable::Gravity, "next() cycle didn't return to its start");
+        assert_eq!(
+            t,
+            Tunable::Gravity,
+            "next() cycle didn't return to its start"
+        );
         for &v in &Tunable::ALL {
             assert!(
                 seen.contains(&v),

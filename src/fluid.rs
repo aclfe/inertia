@@ -707,7 +707,8 @@ impl Fluid {
         for (bi, body) in bodies.iter().enumerate() {
             let dynamic = body.inv_mass() > 0.0;
             for i in 0..self.pos.len() {
-                let Some((n, pen, contact)) = body.penetration(self.pos[i], COLLISION_MARGIN) else {
+                let Some((n, pen, contact)) = body.penetration(self.pos[i], COLLISION_MARGIN)
+                else {
                     continue;
                 };
                 self.pos[i] += n * pen;

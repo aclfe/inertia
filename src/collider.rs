@@ -114,7 +114,11 @@ impl Collider {
         }
     }
 
-    pub fn penetration(&self, p: Vector3<f64>, margin: f64) -> Option<(Vector3<f64>, f64, Vector3<f64>)> {
+    pub fn penetration(
+        &self,
+        p: Vector3<f64>,
+        margin: f64,
+    ) -> Option<(Vector3<f64>, f64, Vector3<f64>)> {
         match *self {
             Collider::Sphere { center, radius, .. } => {
                 let d = p - center;

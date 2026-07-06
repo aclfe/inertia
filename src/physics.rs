@@ -632,8 +632,7 @@ impl PhysicsWorld {
     }
 
     pub fn spawn_cloth(&mut self, origin: Vector3<f64>) {
-        self.cloths
-            .push(Cloth::new(15, 15, origin));
+        self.cloths.push(Cloth::new(15, 15, origin));
     }
 
     pub fn spawn_cloth_hammock(&mut self, origin: Vector3<f64>, span_frac: f64) {

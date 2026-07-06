@@ -410,7 +410,8 @@ impl Cloth {
     fn collide_bodies(&mut self, bodies: &[Collider], h: f64, acc: &mut [BodyContact]) {
         for (bi, body) in bodies.iter().enumerate() {
             for i in 0..self.pos.len() {
-                let Some((n, pen, contact)) = body.penetration(self.pos[i], COLLISION_MARGIN) else {
+                let Some((n, pen, contact)) = body.penetration(self.pos[i], COLLISION_MARGIN)
+                else {
                     continue;
                 };
                 let wp = self.inv_mass[i];
@@ -533,8 +534,14 @@ mod tests {
         step_n(&mut cloth, &[], f64::NEG_INFINITY, 600);
 
         assert!(all_finite(&cloth), "cloth diverged");
-        assert!((cloth.pos[0] - corner_a).norm() < 1e-9, "pinned corner moved");
-        assert!((cloth.pos[14] - corner_b).norm() < 1e-9, "pinned corner moved");
+        assert!(
+            (cloth.pos[0] - corner_a).norm() < 1e-9,
+            "pinned corner moved"
+        );
+        assert!(
+            (cloth.pos[14] - corner_b).norm() < 1e-9,
+            "pinned corner moved"
+        );
         let center = cloth.pos[7 * 15 + 7];
         assert!(
             center.y < corner_a.y,
