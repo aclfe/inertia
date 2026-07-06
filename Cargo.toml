@@ -1,0 +1,40 @@
+[package]
+name = "inertia-tui"
+version = "0.1.0"
+edition = "2024"
+description = "A physics sandbox that runs in your terminal: rigid bodies, n-body gravity, cloth, and fluid, projected in 3D onto braille with no GPU."
+authors = ["Kairav Mittal <kairavmittal@gmail.com>"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/aclfe/inertia"
+keywords = ["physics", "simulation", "tui", "terminal", "ratatui"]
+categories = ["simulation", "command-line-utilities"]
+
+# Published as `inertia-tui` (the plain `inertia` name is taken on crates.io), but the
+# installed command stays `inertia`.
+[[bin]]
+name = "inertia"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30.2"
+nalgebra = "0.33"
+rand = "0.9"
+rapier3d = "0.33"
+
+[profile.dev]
+opt-level = 1
+strip = true
+
+# Build dependencies (rapier, nalgebra, ratatui) fully optimized even in dev, so the
+# per-frame physics and canvas math run at full speed while our own crate still compiles
+# fast at opt-level 1. This is the difference-maker for smooth dev-build framerates.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+# Optimize for speed, not size: "z" (minimum size) noticeably slows the realtime sim.
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
