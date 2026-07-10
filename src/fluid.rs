@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::collider::Collider;
+use crate::collider::{Collider, Reaction};
 
 const H: f64 = 0.6;
 const H2: f64 = H * H;
@@ -20,6 +20,8 @@ const BODY_FRICTION: f64 = 0.7;
 const BUOYANCY_DENSITY: f64 = 55.0;
 const BUOYANCY_DRAG: f64 = 160.0;
 const BUOYANCY_REACH: f64 = 2.0 * H;
+const BUOYANCY_SKIN: f64 = 0.5 * H;
+const MIN_BUOY_PARTICLES: usize = 4;
 const MAX_COUPLING_DV: f64 = 8.0;
 const CONTACT_DRAG_PER_PARTICLE: f64 = 0.02;
 const MAX_CONTACT_DAMP: f64 = 0.4;
@@ -125,12 +127,6 @@ impl Grid {
             }
         }
     }
-}
-
-pub struct Reaction {
-    pub id: usize,
-    pub impulse: Vector3<f64>,
-    pub point: Vector3<f64>,
 }
 
 #[derive(Clone, Copy)]
@@ -402,7 +398,7 @@ impl Fluid {
             self.collide_bodies(bodies, &mut contact);
         }
 
-        let mut reactions = self.buoyancy_reactions(bodies, dt, -gravity.y, container);
+        let mut reactions = self.buoyancy_reactions(bodies, dt, -gravity.y);
         for (bi, body) in bodies.iter().enumerate() {
             let (mut impulse, count) = contact[bi];
             let inv_m = body.inv_mass();
@@ -429,55 +425,38 @@ impl Fluid {
         reactions
     }
 
-    fn buoyancy_reactions(
-        &self,
-        bodies: &[Collider],
-        dt: f64,
-        g: f64,
-        container: Option<(Vector3<f64>, Vector3<f64>)>,
-    ) -> Vec<Reaction> {
+    /// Archimedes buoyancy, resolved per body from the water actually touching it.
+    fn buoyancy_reactions(&self, bodies: &[Collider], dt: f64, g: f64) -> Vec<Reaction> {
         if g <= 0.0 || self.pos.len() < 8 {
             return Vec::new();
         }
-        let free: Vec<Vector3<f64>> = self
-            .pos
-            .iter()
-            .filter(|p| !bodies.iter().any(|b| b.near(**p, H)))
-            .copied()
-            .collect();
-        if free.len() < 8 {
-            return Vec::new();
-        }
-        let inside_tank = |p: Vector3<f64>| -> bool {
-            container.is_none_or(|(min, max)| {
-                p.x >= min.x && p.x <= max.x && p.z >= min.z && p.z <= max.z
-            })
-        };
-
         bodies
             .iter()
             .filter_map(|body| {
                 if body.inv_mass() <= 0.0 {
                     return None;
                 }
-                let (hx, hz) = body.horizontal_half();
                 let c = body.center();
-                let body_inside = inside_tank(c);
-                let mut local: Vec<f64> = free
+                let (hx, hz) = body.horizontal_half();
+                let top = body.top_y();
+                let bottom = 2.0 * c.y - top;
+                let mut ys: Vec<f64> = self
+                    .pos
                     .iter()
                     .filter(|p| {
-                        (p.x - c.x).abs() <= hx + BUOYANCY_REACH
-                            && (p.z - c.z).abs() <= hz + BUOYANCY_REACH
-                            && inside_tank(**p) == body_inside
+                        (p.x - c.x).abs() <= hx + BUOYANCY_SKIN
+                            && (p.z - c.z).abs() <= hz + BUOYANCY_SKIN
+                            && p.y <= top + COLLISION_MARGIN
+                            && p.y >= bottom - BUOYANCY_REACH
                     })
                     .map(|p| p.y)
                     .collect();
-                if local.len() < 4 {
+                if ys.len() < MIN_BUOY_PARTICLES {
                     return None;
                 }
-                local.sort_by(f64::total_cmp);
-                let surface = local[((local.len() as f64 * 0.9) as usize).min(local.len() - 1)];
-                let v_sub = body.submerged_volume(surface);
+                ys.sort_by(f64::total_cmp);
+                let waterline = ys[((ys.len() as f64 * 0.9) as usize).min(ys.len() - 1)];
+                let v_sub = body.submerged_volume(waterline);
                 if v_sub <= 1e-6 {
                     return None;
                 }
@@ -649,6 +628,15 @@ impl Fluid {
         }
     }
 
+    fn bounce(v: &mut Vector3<f64>, axis: usize) {
+        v[axis] = -v[axis] * WALL_RESTITUTION;
+        for a in 0..3 {
+            if a != axis {
+                v[a] *= WALL_FRICTION;
+            }
+        }
+    }
+
     fn collide_floor(&mut self, ground_y: f64, ground_half: f64) {
         if !ground_y.is_finite() {
             return;
@@ -660,9 +648,7 @@ impl Fluid {
             if self.pos[i].y < ground_y {
                 self.pos[i].y = ground_y;
                 if self.vel[i].y < 0.0 {
-                    self.vel[i].y = -self.vel[i].y * WALL_RESTITUTION;
-                    self.vel[i].x *= WALL_FRICTION;
-                    self.vel[i].z *= WALL_FRICTION;
+                    Self::bounce(&mut self.vel[i], 1);
                 }
             }
         }
@@ -670,34 +656,17 @@ impl Fluid {
 
     fn collide_container(&mut self, min: Vector3<f64>, max: Vector3<f64>) {
         for i in 0..self.pos.len() {
-            if self.pos[i].x < min.x {
-                self.pos[i].x = min.x;
-                if self.vel[i].x < 0.0 {
-                    self.vel[i].x = -self.vel[i].x * WALL_RESTITUTION;
-                    self.vel[i].y *= WALL_FRICTION;
-                    self.vel[i].z *= WALL_FRICTION;
-                }
-            } else if self.pos[i].x > max.x {
-                self.pos[i].x = max.x;
-                if self.vel[i].x > 0.0 {
-                    self.vel[i].x = -self.vel[i].x * WALL_RESTITUTION;
-                    self.vel[i].y *= WALL_FRICTION;
-                    self.vel[i].z *= WALL_FRICTION;
-                }
-            }
-            if self.pos[i].z < min.z {
-                self.pos[i].z = min.z;
-                if self.vel[i].z < 0.0 {
-                    self.vel[i].z = -self.vel[i].z * WALL_RESTITUTION;
-                    self.vel[i].x *= WALL_FRICTION;
-                    self.vel[i].y *= WALL_FRICTION;
-                }
-            } else if self.pos[i].z > max.z {
-                self.pos[i].z = max.z;
-                if self.vel[i].z > 0.0 {
-                    self.vel[i].z = -self.vel[i].z * WALL_RESTITUTION;
-                    self.vel[i].x *= WALL_FRICTION;
-                    self.vel[i].y *= WALL_FRICTION;
+            for axis in [0, 2] {
+                if self.pos[i][axis] < min[axis] {
+                    self.pos[i][axis] = min[axis];
+                    if self.vel[i][axis] < 0.0 {
+                        Self::bounce(&mut self.vel[i], axis);
+                    }
+                } else if self.pos[i][axis] > max[axis] {
+                    self.pos[i][axis] = max[axis];
+                    if self.vel[i][axis] > 0.0 {
+                        Self::bounce(&mut self.vel[i], axis);
+                    }
                 }
             }
         }
@@ -956,6 +925,42 @@ mod tests {
         assert_eq!(
             up, 0.0,
             "a body far from the pool must not be buoyed, got {up}"
+        );
+    }
+
+    #[test]
+    fn body_lifted_out_of_the_pool_stops_being_buoyed() {
+        let mut fluid = Fluid::new();
+        fluid.spawn_block(Vector3::new(0.0, 1.5, 0.0), Vector3::new(2.0, 1.5, 2.0));
+        for _ in 0..120 {
+            fluid.step(DT, GRAVITY, GROUND, f64::INFINITY, &[], None);
+        }
+        let surface = {
+            let mut ys: Vec<f64> = fluid.pos.iter().map(|p| p.y).collect();
+            ys.sort_by(f64::total_cmp);
+            ys[((ys.len() as f64 * 0.9) as usize).min(ys.len() - 1)]
+        };
+        let body = Collider::Cuboid {
+            id: 0,
+            center: Vector3::new(0.0, surface + 2.0, 0.0),
+            basis: [Vector3::x(), Vector3::y(), Vector3::z()],
+            half: Vector3::new(0.5, 0.5, 0.5),
+            inv_mass: 1.0 / 10.0,
+            linvel: Vector3::zeros(),
+            angvel: Vector3::zeros(),
+        };
+        let reactions = fluid.step(
+            DT,
+            GRAVITY,
+            GROUND,
+            f64::INFINITY,
+            std::slice::from_ref(&body),
+            None,
+        );
+        let up: f64 = reactions.iter().map(|r| r.impulse.y).sum();
+        assert_eq!(
+            up, 0.0,
+            "a body lifted clear of the pool must not be buoyed, got {up}"
         );
     }
 
