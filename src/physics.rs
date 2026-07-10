@@ -9,7 +9,7 @@ use rapier3d::prelude::{
 };
 
 use crate::cloth::{self, Cloth, ClothView};
-use crate::collider::Collider;
+use crate::collider::{Collider, Reaction};
 use crate::fluid::{self, Fluid, FluidView};
 use crate::nbody;
 
@@ -567,10 +567,18 @@ impl PhysicsWorld {
             FloorMode::Normal => GRID_HALF_EXTENT as f64,
             _ => f64::INFINITY,
         };
-        for r in self
+        let reactions = self
             .fluid
-            .step(dt, gravity, ground_y, ground_half, &colliders, container)
-        {
+            .step(dt, gravity, ground_y, ground_half, &colliders, container);
+        self.apply_reactions(&handles, reactions);
+    }
+
+    fn apply_reactions(
+        &mut self,
+        handles: &[RigidBodyHandle],
+        reactions: impl IntoIterator<Item = Reaction>,
+    ) {
+        for r in reactions {
             if let Some(body) = self.bodies.get_mut(handles[r.id]) {
                 let impulse =
                     Vector::new(r.impulse.x as f32, r.impulse.y as f32, r.impulse.z as f32);
@@ -610,16 +618,11 @@ impl PhysicsWorld {
             0.0
         };
 
+        let mut reactions = Vec::new();
         for cloth in &mut self.cloths {
-            for r in cloth.step(dt, gravity, wind, ground_y, &colliders) {
-                if let Some(body) = self.bodies.get_mut(handles[r.id]) {
-                    let impulse =
-                        Vector::new(r.impulse.x as f32, r.impulse.y as f32, r.impulse.z as f32);
-                    let point = Vector::new(r.point.x as f32, r.point.y as f32, r.point.z as f32);
-                    body.apply_impulse_at_point(impulse, point, true);
-                }
-            }
+            reactions.extend(cloth.step(dt, gravity, wind, ground_y, &colliders));
         }
+        self.apply_reactions(&handles, reactions);
 
         for _ in 0..CLOTH_COLLISION_PASSES {
             for a in 0..self.cloths.len() {

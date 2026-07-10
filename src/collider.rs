@@ -1,5 +1,11 @@
 use nalgebra::Vector3;
 
+pub struct Reaction {
+    pub id: usize,
+    pub impulse: Vector3<f64>,
+    pub point: Vector3<f64>,
+}
+
 pub enum Collider {
     Sphere {
         id: usize,
@@ -80,16 +86,6 @@ impl Collider {
                 center.y + vy
             }
         }
-    }
-
-    pub fn near(&self, p: Vector3<f64>, margin: f64) -> bool {
-        let c = self.center();
-        let (hx, hz) = self.horizontal_half();
-        if (p.x - c.x).abs() > hx + margin || (p.z - c.z).abs() > hz + margin {
-            return false;
-        }
-        let vy = self.top_y() - c.y;
-        (p.y - c.y).abs() <= vy + margin
     }
 
     pub fn submerged_volume(&self, surface: f64) -> f64 {

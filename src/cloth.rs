@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::collider::Collider;
+use crate::collider::{Collider, Reaction};
 
 const SPACING: f64 = 0.32;
 const SUBSTEPS: usize = 4;
@@ -24,12 +24,6 @@ const SELF_COLLIDE_SKIP: usize = 2;
 const SELF_COLLIDE_FRICTION: f64 = 0.3;
 pub const WIND_ACCEL: Vector3<f64> = Vector3::new(6.0, 0.0, 2.5);
 const MAX_FLUID_COUPLE_DV: f64 = 20.0;
-
-pub struct Reaction {
-    pub id: usize,
-    pub impulse: Vector3<f64>,
-    pub point: Vector3<f64>,
-}
 
 #[derive(Clone, Copy, Default)]
 struct BodyContact {
