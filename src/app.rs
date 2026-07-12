@@ -19,6 +19,9 @@ pub const SPAWN_DROP_HEIGHT: f64 = 2.0;
 pub const DEFAULT_SPAWN_MASS: f64 = 50.0;
 pub const MIN_SPAWN_MASS: f64 = 1.0;
 pub const MAX_SPAWN_MASS: f64 = 100_000.0;
+pub const DEFAULT_SPAWN_SCALE: f64 = 1.0;
+pub const MIN_SPAWN_SCALE: f64 = 0.4;
+pub const MAX_SPAWN_SCALE: f64 = 3.0;
 pub const MAX_SANDBOXES: usize = 9;
 
 pub const DEFAULT_LAUNCH_SPEED: f64 = 20.0;
@@ -33,24 +36,32 @@ pub enum Tunable {
     Friction,
     Restitution,
     Damping,
+    SpawnSize,
     LaunchSpeed,
     TimeScale,
     ClothStiffness,
     WindStrength,
     Viscosity,
+    Ambient,
+    Conductivity,
+    Cooling,
 }
 
 impl Tunable {
-    pub const ALL: [Tunable; 9] = [
+    pub const ALL: [Tunable; 13] = [
         Tunable::Gravity,
         Tunable::Friction,
         Tunable::Restitution,
         Tunable::Damping,
+        Tunable::SpawnSize,
         Tunable::LaunchSpeed,
         Tunable::TimeScale,
         Tunable::ClothStiffness,
         Tunable::WindStrength,
         Tunable::Viscosity,
+        Tunable::Ambient,
+        Tunable::Conductivity,
+        Tunable::Cooling,
     ];
 
     pub fn label(self) -> &'static str {
@@ -59,11 +70,15 @@ impl Tunable {
             Tunable::Friction => "Friction",
             Tunable::Restitution => "Bounce",
             Tunable::Damping => "Drag",
+            Tunable::SpawnSize => "Size",
             Tunable::LaunchSpeed => "Launch",
             Tunable::TimeScale => "Time",
             Tunable::ClothStiffness => "Stiffness",
             Tunable::WindStrength => "Wind",
             Tunable::Viscosity => "Viscosity",
+            Tunable::Ambient => "Ambient",
+            Tunable::Conductivity => "Conduct",
+            Tunable::Cooling => "Cooling",
         }
     }
 
@@ -72,12 +87,16 @@ impl Tunable {
             Tunable::Gravity => Tunable::Friction,
             Tunable::Friction => Tunable::Restitution,
             Tunable::Restitution => Tunable::Damping,
-            Tunable::Damping => Tunable::LaunchSpeed,
+            Tunable::Damping => Tunable::SpawnSize,
+            Tunable::SpawnSize => Tunable::LaunchSpeed,
             Tunable::LaunchSpeed => Tunable::TimeScale,
             Tunable::TimeScale => Tunable::ClothStiffness,
             Tunable::ClothStiffness => Tunable::WindStrength,
             Tunable::WindStrength => Tunable::Viscosity,
-            Tunable::Viscosity => Tunable::Gravity,
+            Tunable::Viscosity => Tunable::Ambient,
+            Tunable::Ambient => Tunable::Conductivity,
+            Tunable::Conductivity => Tunable::Cooling,
+            Tunable::Cooling => Tunable::Gravity,
         }
     }
 }
@@ -87,6 +106,8 @@ pub enum Tool {
     Place,
     Grab,
     Fluid,
+    Heat,
+    Build,
 }
 
 impl Tool {
@@ -94,7 +115,34 @@ impl Tool {
         match self {
             Tool::Place => Tool::Grab,
             Tool::Grab => Tool::Fluid,
-            Tool::Fluid => Tool::Place,
+            Tool::Fluid => Tool::Heat,
+            Tool::Heat => Tool::Build,
+            Tool::Build => Tool::Place,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StructureKind {
+    Platform,
+    Ramp,
+    Wall,
+}
+
+impl StructureKind {
+    pub fn next(self) -> Self {
+        match self {
+            StructureKind::Platform => StructureKind::Ramp,
+            StructureKind::Ramp => StructureKind::Wall,
+            StructureKind::Wall => StructureKind::Platform,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StructureKind::Platform => "platform",
+            StructureKind::Ramp => "ramp",
+            StructureKind::Wall => "wall",
         }
     }
 }
@@ -157,7 +205,7 @@ pub enum Scene {
     RigidStack,
     ThreeBody,
     Cloth,
-    Fluid,
+    Thermal,
 }
 
 struct SandboxState {
@@ -175,23 +223,23 @@ impl SandboxState {
             Scene::RigidStack => Self::rigid_stack(),
             Scene::ThreeBody => Self::three_body(),
             Scene::Cloth => Self::cloth_demo(),
-            Scene::Fluid => Self::fluid_demo(),
+            Scene::Thermal => Self::thermal_demo(),
         }
     }
 
-    fn fluid_demo() -> Self {
+    fn thermal_demo() -> Self {
         let mut physics = PhysicsWorld::new();
+        physics.set_ambient(20.0);
+        physics.set_thermo(true);
         physics.spawn_container(Vector3::new(0.0, 0.0, 0.0), 2.4, 3.0);
-        physics.spawn_fluid_block(Vector3::new(0.0, 1.2, 0.0), Vector3::new(2.25, 1.2, 2.25));
-        physics.spawn(SpawnKind::Sphere, Vector3::new(-1.0, 5.0, 0.0), 15.0);
-        physics.spawn(SpawnKind::Box, Vector3::new(0.9, 8.0, 0.6), 40.0);
-        let floater = physics.spawn(SpawnKind::Sphere, Vector3::new(0.0, 11.0, -0.8), 3.0);
+        physics.spawn_fluid_block(Vector3::new(0.0, 1.1, 0.0), Vector3::new(2.25, 1.0, 2.25));
+        physics.set_fluid_floor_temp(Some(240.0));
         Self {
             physics,
-            spawn_kind: SpawnKind::Box,
+            spawn_kind: SpawnKind::Sphere,
             spawn_mass: 30.0,
-            color_mode: ColorMode::Velocity,
-            selected: Some(floater),
+            color_mode: ColorMode::Temperature,
+            selected: None,
         }
     }
 
@@ -292,6 +340,8 @@ pub struct App {
     pub physics: PhysicsWorld,
     pub spawn_kind: SpawnKind,
     pub spawn_mass: f64,
+    pub spawn_scale: f64,
+    pub build_kind: StructureKind,
     pub color_mode: ColorMode,
     pub selected: Option<RigidBodyHandle>,
     saved: Vec<Option<SandboxState>>,
@@ -306,6 +356,7 @@ pub struct App {
     pub cloth_grab: Option<ClothGrab>,
     pub layout: Layout3D,
     pub show_help: bool,
+    pub help_page: usize,
     pub running: bool,
 }
 
@@ -316,7 +367,7 @@ fn scene_camera(scene: Scene) -> Camera {
             camera.target = Vector3::new(0.0, 2.4, 0.0);
             camera.distance = 8.5;
         }
-        Scene::Fluid => {
+        Scene::Thermal => {
             camera.target = Vector3::new(0.0, 1.0, 0.0);
             camera.distance = 12.0;
         }
@@ -334,6 +385,8 @@ impl App {
             physics: first.physics,
             spawn_kind: first.spawn_kind,
             spawn_mass: first.spawn_mass,
+            spawn_scale: DEFAULT_SPAWN_SCALE,
+            build_kind: StructureKind::Platform,
             color_mode: first.color_mode,
             selected: first.selected,
             saved: vec![None],
@@ -348,6 +401,7 @@ impl App {
             cloth_grab: None,
             layout: Layout3D::default(),
             show_help: false,
+            help_page: 0,
             running: true,
         }
     }
@@ -356,8 +410,17 @@ impl App {
         self.paused = !self.paused;
     }
 
+    pub const HELP_PAGES: usize = 2;
+
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+        if self.show_help {
+            self.help_page = 0;
+        }
+    }
+
+    pub fn flip_help_page(&mut self) {
+        self.help_page = (self.help_page + 1) % Self::HELP_PAGES;
     }
 
     pub fn cycle_tool(&mut self) {
@@ -374,6 +437,9 @@ impl App {
             Tunable::ClothStiffness => self.physics.has_cloth(),
             Tunable::WindStrength => self.physics.has_cloth(),
             Tunable::Viscosity => self.physics.has_fluid(),
+            Tunable::Ambient => self.physics.thermo_enabled(),
+            Tunable::Conductivity => self.physics.thermo_enabled(),
+            Tunable::Cooling => self.physics.thermo_enabled(),
             _ => true,
         }
     }
@@ -414,6 +480,11 @@ impl App {
                 self.launch_speed =
                     (self.launch_speed + sign * 2.5).clamp(MIN_LAUNCH_SPEED, MAX_LAUNCH_SPEED);
             }
+            Tunable::SpawnSize => {
+                let factor = if increase { 1.15 } else { 1.0 / 1.15 };
+                self.spawn_scale =
+                    (self.spawn_scale * factor).clamp(MIN_SPAWN_SCALE, MAX_SPAWN_SCALE);
+            }
             Tunable::TimeScale => {
                 let factor = if increase { 1.25 } else { 1.0 / 1.25 };
                 self.time_scale = (self.time_scale * factor).clamp(MIN_TIME_SCALE, MAX_TIME_SCALE);
@@ -431,6 +502,15 @@ impl App {
                 self.physics
                     .set_fluid_viscosity(self.physics.fluid_viscosity() + sign * 1.0);
             }
+            Tunable::Ambient => self
+                .physics
+                .set_ambient(self.physics.ambient() + sign * 5.0),
+            Tunable::Conductivity => self
+                .physics
+                .set_conductivity(self.physics.conductivity() + sign * 0.25),
+            Tunable::Cooling => self
+                .physics
+                .set_cooling(self.physics.cooling() + sign * 0.1),
         }
     }
 
@@ -440,7 +520,7 @@ impl App {
         }
         match self.physics.gravity_mode() {
             GravityMode::Uniform => "Rigid Body",
-            GravityMode::NBody => "N-body Gravity",
+            GravityMode::NBody => "Space",
         }
     }
 
@@ -450,6 +530,7 @@ impl App {
             Tunable::Friction => format!("{:.2}", self.physics.friction()),
             Tunable::Restitution => format!("{:.2}", self.physics.restitution()),
             Tunable::Damping => format!("{:.2}", self.physics.damping()),
+            Tunable::SpawnSize => format!("{:.2}x", self.spawn_scale),
             Tunable::LaunchSpeed => format!("{:.1}", self.launch_speed),
             Tunable::TimeScale => format!("{:.2}x", self.time_scale),
             Tunable::ClothStiffness => self
@@ -458,6 +539,9 @@ impl App {
                 .map_or_else(|| "-".to_string(), |s| format!("{s:.2}")),
             Tunable::WindStrength => format!("{:.2}x", self.physics.wind_strength()),
             Tunable::Viscosity => format!("{:.1}", self.physics.fluid_viscosity()),
+            Tunable::Ambient => format!("{:.0} C", self.physics.ambient()),
+            Tunable::Conductivity => format!("{:.2}", self.physics.conductivity()),
+            Tunable::Cooling => format!("{:.2}x", self.physics.cooling()),
         }
     }
 

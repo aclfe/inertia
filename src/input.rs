@@ -5,8 +5,8 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
-use crate::app::{App, MAX_SPAWN_MASS, MIN_SPAWN_MASS, SPAWN_DROP_HEIGHT, Tool};
-use crate::physics::{G, GravityMode, SpawnKind};
+use crate::app::{App, MAX_SPAWN_MASS, MIN_SPAWN_MASS, SPAWN_DROP_HEIGHT, StructureKind, Tool};
+use crate::physics::{G, GravityMode, HEAT_TOOL_DELTA, SpawnKind};
 
 const ORBIT_STEP: f64 = 0.08;
 const PAN_STEP: f64 = 0.3;
@@ -18,11 +18,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
 
     if app.show_help {
-        if matches!(
-            key.code,
-            KeyCode::Char('?') | KeyCode::Char('h') | KeyCode::Esc | KeyCode::Char('q')
-        ) {
-            app.show_help = false;
+        match key.code {
+            KeyCode::Char('?') | KeyCode::Char('h') | KeyCode::Esc | KeyCode::Char('q') => {
+                app.show_help = false;
+            }
+            KeyCode::Tab
+            | KeyCode::Char(' ')
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Char('n')
+            | KeyCode::Char('p') => app.flip_help_page(),
+            _ => {}
         }
         return;
     }
@@ -41,9 +47,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Right => app.camera.orbit(ORBIT_STEP, 0.0),
         KeyCode::Up => app.camera.orbit(0.0, -ORBIT_STEP),
         KeyCode::Down => app.camera.orbit(0.0, ORBIT_STEP),
-        KeyCode::Char('b') => app.spawn_kind = SpawnKind::Box,
-        KeyCode::Char('s') => app.spawn_kind = SpawnKind::Sphere,
-        KeyCode::Char('n') => app.spawn_kind = SpawnKind::Star,
+        KeyCode::Char('b') => select_spawn(app, SpawnKind::Box),
+        KeyCode::Char('s') => select_spawn(app, SpawnKind::Sphere),
+        KeyCode::Char('n') => select_spawn(app, SpawnKind::Star),
         KeyCode::Char('x') => {
             if let Some(handle) = app.selected.take() {
                 app.physics.remove(handle);
@@ -75,6 +81,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             let y = 3.5 + app.physics.cloth_count() as f64 * 1.0;
             app.physics.spawn_cloth(Vector3::new(0.0, y, 0.0));
         }
+        KeyCode::Char('l') => {
+            let y = 3.5 + app.physics.cloth_count() as f64 * 1.0;
+            app.physics
+                .spawn_cloth_hammock(Vector3::new(0.0, y, 0.0), 0.9);
+        }
         KeyCode::Char('K') => {
             app.physics.remove_cloth();
             app.cloth_grab = None;
@@ -84,7 +95,23 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 .spawn_fluid_block(Vector3::new(0.0, 3.0, 0.0), Vector3::new(1.3, 0.7, 1.3));
         }
         KeyCode::Char('J') => app.physics.clear_fluid(),
+        KeyCode::Char('o') => {
+            app.physics.toggle_container(
+                Vector3::new(0.0, 0.0, 0.0),
+                TANK_HALF_EXTENT,
+                TANK_WALL_HEIGHT,
+            );
+        }
         KeyCode::Char('w') => app.physics.toggle_wind(),
+        KeyCode::Char('e') => {
+            use crate::render::ColorMode;
+            let on = !app.physics.thermo_enabled();
+            app.physics.set_thermo(on);
+            if on {
+                app.color_mode = ColorMode::Temperature;
+            }
+            app.ensure_tunable_applicable();
+        }
         KeyCode::Char(c @ '1'..='9') => {
             app.switch_sandbox(c as usize - '1' as usize);
         }
@@ -96,6 +123,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
         _ => {}
     }
+}
+
+fn select_spawn(app: &mut App, kind: SpawnKind) {
+    app.spawn_kind = kind;
+    app.tool = Tool::Place;
 }
 
 fn toggle_gravity_mode(app: &mut App) {
@@ -127,9 +159,13 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
             Tool::Place => spawn_at_cursor(app, col, row),
             Tool::Grab => begin_grab(app, col, row),
             Tool::Fluid => pour_fluid(app, col, row),
+            Tool::Heat => heat_at_cursor(app, col, row, true),
+            Tool::Build => build_at_cursor(app, col, row),
         },
         MouseEventKind::Drag(MouseButton::Left) => match app.tool {
             Tool::Fluid => pour_fluid(app, col, row),
+            Tool::Heat => heat_at_cursor(app, col, row, true),
+            Tool::Build => {}
             _ => update_grab(app, col, row),
         },
         MouseEventKind::Up(MouseButton::Left) => app.release_grab(),
@@ -137,6 +173,10 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
         MouseEventKind::Down(MouseButton::Right) => {
             if app.tool == Tool::Fluid {
                 toggle_fluid_source(app, col, row);
+            } else if app.tool == Tool::Heat {
+                heat_at_cursor(app, col, row, false);
+            } else if app.tool == Tool::Build {
+                app.build_kind = app.build_kind.next();
             } else if !try_pin_cloth(app, col, row) {
                 select_at_cursor(app, col, row);
             }
@@ -154,6 +194,54 @@ fn pour_fluid(app: &mut App, column: u16, row: u16) {
         app.physics
             .spawn_fluid_blob(hit + Vector3::new(0.0, FLUID_BRUSH_DROP, 0.0));
     }
+}
+
+const FLUID_HEAT_RADIUS: f64 = 1.2;
+
+fn heat_at_cursor(app: &mut App, column: u16, row: u16, warm: bool) {
+    let delta = if warm {
+        HEAT_TOOL_DELTA
+    } else {
+        -HEAT_TOOL_DELTA
+    };
+    if let Some(handle) = body_at_cursor(app, column, row) {
+        app.physics.add_heat(handle, delta);
+        app.selected = Some(handle);
+    } else if app.physics.has_fluid()
+        && let Some(hit) = ground_hit(app, column, row)
+    {
+        app.physics.heat_fluid_near(hit, FLUID_HEAT_RADIUS, delta);
+    }
+}
+
+const PLATFORM_HALF: Vector3<f64> = Vector3::new(1.1, 0.15, 1.1);
+const RAMP_HALF: Vector3<f64> = Vector3::new(1.2, 0.12, 1.1);
+const RAMP_TILT: f64 = 0.5;
+const WALL_HALF: Vector3<f64> = Vector3::new(0.15, 1.0, 1.1);
+const TANK_HALF_EXTENT: f64 = 2.2;
+const TANK_WALL_HEIGHT: f64 = 2.5;
+
+fn build_at_cursor(app: &mut App, column: u16, row: u16) {
+    let Some(hit) = ground_hit(app, column, row) else {
+        return;
+    };
+    let handle = match app.build_kind {
+        StructureKind::Platform => {
+            let center = hit + Vector3::new(0.0, PLATFORM_HALF.y, 0.0);
+            app.physics.spawn_obstacle(center, PLATFORM_HALF)
+        }
+        StructureKind::Wall => {
+            let center = hit + Vector3::new(0.0, WALL_HALF.y, 0.0);
+            app.physics.spawn_obstacle(center, WALL_HALF)
+        }
+        StructureKind::Ramp => {
+            // Lift the tilted slab so its lower corner rests near the ground.
+            let lift = RAMP_HALF.x * RAMP_TILT.sin() + RAMP_HALF.y * RAMP_TILT.cos();
+            let center = hit + Vector3::new(0.0, lift, 0.0);
+            app.physics.spawn_ramp(center, RAMP_HALF, RAMP_TILT)
+        }
+    };
+    app.selected = Some(handle);
 }
 
 fn toggle_fluid_source(app: &mut App, column: u16, row: u16) {
@@ -246,9 +334,9 @@ fn launch_at_cursor(app: &mut App, column: u16, row: u16) {
     };
     let origin = eye + dir * 1.0;
     let vel = dir * app.launch_speed;
-    let handle = app
-        .physics
-        .spawn_with_velocity(app.spawn_kind, origin, vel, app.spawn_mass);
+    let handle =
+        app.physics
+            .spawn_scaled(app.spawn_kind, origin, vel, app.spawn_mass, app.spawn_scale);
     app.selected = Some(handle);
 }
 
@@ -259,11 +347,13 @@ fn spawn_at_cursor(app: &mut App, column: u16, row: u16) {
     let handle = match app.spawn_kind {
         SpawnKind::Star => {
             let vel = orbital_velocity(app, hit);
-            app.physics.spawn_star(hit, vel, app.spawn_mass)
+            app.physics
+                .spawn_scaled(SpawnKind::Star, hit, vel, app.spawn_mass, app.spawn_scale)
         }
         kind => {
             let pos = hit + Vector3::new(0.0, SPAWN_DROP_HEIGHT, 0.0);
-            app.physics.spawn(kind, pos, app.spawn_mass)
+            app.physics
+                .spawn_scaled(kind, pos, Vector3::zeros(), app.spawn_mass, app.spawn_scale)
         }
     };
     app.selected = Some(handle);

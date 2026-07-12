@@ -66,22 +66,26 @@ fn mass_color(mass: f64) -> Color {
     Color::Rgb(v, v, v)
 }
 
-fn temperature_color(mass: f64) -> Color {
-    let t = mass_t(mass);
-    if t < 0.5 {
-        let u = (t * 2.0 * 255.0) as u8;
-        Color::Rgb(255, u, u)
+const TEMP_COLD_C: f64 = -20.0;
+const TEMP_HOT_C: f64 = 250.0;
+
+fn heat_color(temp: f64) -> Color {
+    let u = ((temp - TEMP_COLD_C) / (TEMP_HOT_C - TEMP_COLD_C)).clamp(0.0, 1.0);
+    let (r, g, b) = if u < 0.5 {
+        let v = u * 2.0;
+        (v, 0.0, 1.0 - v)
     } else {
-        let u = ((1.0 - (t - 0.5) * 2.0) * 255.0) as u8;
-        Color::Rgb(u, u, 255)
-    }
+        let v = (u - 0.5) * 2.0;
+        (1.0, v, (v - 0.5).max(0.0) * 2.0)
+    };
+    Color::Rgb((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
 fn body_color(mode: ColorMode, body: &BodyView) -> Color {
     match mode {
         ColorMode::Velocity => velocity_color(body.speed),
         ColorMode::Mass => mass_color(body.mass),
-        ColorMode::Temperature => temperature_color(body.mass),
+        ColorMode::Temperature => heat_color(body.temp),
         ColorMode::Density => velocity_color(body.speed),
     }
 }
@@ -95,9 +99,10 @@ fn density_color(ratio: f64) -> Color {
     )
 }
 
-fn fluid_color(mode: ColorMode, speed: f64, density_ratio: f64) -> Color {
+fn fluid_color(mode: ColorMode, speed: f64, density_ratio: f64, temp: f64) -> Color {
     match mode {
         ColorMode::Density => density_color(density_ratio),
+        ColorMode::Temperature => heat_color(temp),
         _ => velocity_color(speed),
     }
 }
@@ -129,7 +134,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             f.speeds
                 .iter()
                 .zip(&f.density_ratio)
-                .map(|(&s, &d)| fluid_color(color_mode, s, d))
+                .zip(&f.temps)
+                .map(|((&s, &d), &t)| fluid_color(color_mode, s, d, t))
                 .collect()
         })
         .unwrap_or_default();
@@ -212,7 +218,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Paragraph::new(hint).dim(), hint_area);
 
     if app.show_help {
-        draw_help(frame);
+        draw_help(frame, app.help_page);
     }
 }
 
@@ -239,6 +245,9 @@ fn draw_sidebar(frame: &mut Frame, app: &App, bodies: &[BodyView], area: Rect) {
 
 fn draw_mode_panel(frame: &mut Frame, app: &App, area: Rect) {
     let mut header = vec![app.mode_label().bold()];
+    if app.physics.thermo_enabled() {
+        header.push("  Thermal".magenta().bold());
+    }
     if app.paused {
         header.push("  [PAUSED]".red().bold());
     }
@@ -278,14 +287,19 @@ fn draw_params_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_spawn_panel(frame: &mut Frame, app: &App, area: Rect) {
     let mouse = match app.tool {
-        Tool::Place => "Place (L-click drops)",
-        Tool::Grab => "Grab (L-drag throws)",
-        Tool::Fluid => "Fluid (L-pour R-source)",
+        Tool::Place => "Place (L-click drops)".to_string(),
+        Tool::Grab => "Grab (L-drag throws)".to_string(),
+        Tool::Fluid => "Fluid (L-pour R-source)".to_string(),
+        Tool::Heat => "Heat (L-warm R-cool)".to_string(),
+        Tool::Build => format!("Build {} (R cycles)", app.build_kind.label()),
     };
     let mut lines = vec![
         Line::from(vec!["Mouse  ".into(), mouse.bold()]),
         Line::from(format!("Kind   {:?}", app.spawn_kind)),
-        Line::from(format!("Mass   {:.0}", app.spawn_mass)),
+        Line::from(format!(
+            "Mass   {:.0}   x{:.2}",
+            app.spawn_mass, app.spawn_scale
+        )),
         Line::from(format!("Color  {:?}", app.color_mode)),
     ];
     if app.physics.gravity_mode() == GravityMode::NBody {
@@ -307,6 +321,9 @@ fn draw_spawn_panel(frame: &mut Frame, app: &App, area: Rect) {
             if app.physics.wind() { "on" } else { "off" },
         )));
     }
+    if app.physics.has_container() {
+        lines.push(Line::from("Tank   on"));
+    }
     if app.physics.has_fluid() {
         let sources = app.physics.fluid_emitter_count();
         let mut text = format!("Fluid  {} particles", app.physics.fluid_len());
@@ -314,6 +331,12 @@ fn draw_spawn_panel(frame: &mut Frame, app: &App, area: Rect) {
             text.push_str(&format!("  {sources} src"));
         }
         lines.push(Line::from(text));
+    }
+    if app.physics.thermo_enabled() {
+        lines.push(Line::from(format!(
+            "Thermo on    Amb {:.0} C",
+            app.physics.ambient()
+        )));
     }
     frame.render_widget(Paragraph::new(lines).block(panel("Spawn")), area);
 }
@@ -326,7 +349,7 @@ fn draw_inspector_panel(frame: &mut Frame, app: &App, bodies: &[BodyView], area:
                 BodyKind::Sphere { .. } => "Sphere",
                 BodyKind::Star { .. } => "Star",
             };
-            vec![
+            let mut lines = vec![
                 Line::from(kind_name.bold()),
                 Line::from(format!(
                     "Pos  {:.2}, {:.2}, {:.2}",
@@ -338,84 +361,116 @@ fn draw_inspector_panel(frame: &mut Frame, app: &App, bodies: &[BodyView], area:
                 )),
                 Line::from(format!("Speed {:.2} m/s", body.speed)),
                 Line::from(format!("Mass  {:.2} kg", body.mass)),
-            ]
+            ];
+            if app.physics.thermo_enabled() {
+                lines.push(Line::from(format!("Temp  {:.0} C", body.temp)));
+            }
+            lines
         }
         None => vec![Line::from("nothing selected".dim())],
     };
     frame.render_widget(Paragraph::new(lines).block(panel("Inspector")), area);
 }
 
-fn draw_help(frame: &mut Frame) {
-    let groups: [(&str, &[(&str, &str)]); 7] = [
-        (
-            "Camera",
-            &[
-                ("arrows", "orbit"),
-                ("shift+arrows", "pan"),
-                ("+ / -", "zoom"),
-                ("r", "reset view"),
-            ],
-        ),
-        (
-            "Spawn",
-            &[
-                ("b / s / n", "box / sphere / star"),
-                ("k / K", "add / remove cloth sheet"),
-                ("j / J", "add fluid block / clear fluid"),
-                ("[ / ]", "mass down / up"),
-            ],
-        ),
-        (
-            "Mouse",
-            &[
-                ("d", "switch place / grab / fluid tool"),
-                ("Place: L-click", "drop a body at cursor"),
-                ("Grab: L-drag", "drag a body or cloth vertex"),
-                ("Fluid: L-drag", "pour fluid at cursor"),
-                ("Fluid: R-click", "drop / remove infinite source"),
-                ("M-click", "launch from camera"),
-                ("R-click / tab", "select / pin cloth vertex"),
-            ],
-        ),
-        (
-            "Simulation",
-            &[
-                ("space", "pause"),
-                ("m", "single step"),
-                ("g", "gravity mode"),
-                ("f", "floor mode"),
-                ("a", "n-body solver"),
-                ("t", "trails"),
-                ("w", "wind (cloth)"),
-                ("c", "color mode"),
-            ],
-        ),
-        (
-            "Parameters",
-            &[(";", "select parameter"), (", / .", "decrease / increase")],
-        ),
-        ("Sandboxes", &[("1-9", "switch / create slot")]),
-        (
-            "General",
-            &[
-                ("x / X", "delete selected / clear"),
-                ("? / h", "toggle this help"),
-                ("q / esc", "quit"),
-            ],
-        ),
-    ];
+type HelpGroup = (&'static str, &'static [(&'static str, &'static str)]);
 
-    let mut lines = vec![Line::from("Controls".bold()), Line::from("")];
-    for (title, binds) in groups {
+const HELP_PAGE_1: &[HelpGroup] = &[
+    (
+        "Camera",
+        &[
+            ("arrows", "orbit"),
+            ("shift+arrows", "pan"),
+            ("+ / -", "zoom"),
+            ("r", "reset view"),
+        ],
+    ),
+    (
+        "Mouse tools",
+        &[
+            ("d", "cycle the active tool"),
+            ("Place", "L drop object   (b/s/n picks kind)"),
+            ("Grab", "L drag or throw a body / cloth vertex"),
+            ("Fluid", "L pour water    R toggle source"),
+            ("Heat", "L warm    R cool    (body or water)"),
+            ("Build", "L place    R cycle platform/ramp/wall"),
+            ("M-click", "launch object from camera"),
+            ("R-click", "select body / pin cloth vertex"),
+        ],
+    ),
+    (
+        "Objects",
+        &[
+            ("b / s / n", "box / sphere / star  (picks Place)"),
+            ("[ / ]", "spawn mass down / up"),
+            ("k / l", "cloth sheet / pinned hammock"),
+            ("j", "fluid block"),
+            ("o", "water tank (toggle)"),
+            ("K / J", "clear cloth / fluid"),
+            ("x / X", "delete selected / clear all"),
+        ],
+    ),
+];
+
+const HELP_PAGE_2: &[HelpGroup] = &[
+    (
+        "Space",
+        &[
+            ("g", "enter / leave space (mutual gravity)"),
+            ("a", "n-body solver"),
+            ("t", "orbit trails"),
+        ],
+    ),
+    (
+        "Simulation",
+        &[
+            ("space", "pause"),
+            ("m", "single step"),
+            ("f", "floor mode"),
+            ("w", "wind (cloth)"),
+            ("e", "thermodynamics"),
+            ("c", "color mode"),
+        ],
+    ),
+    (
+        "Parameters",
+        &[
+            (";", "select parameter"),
+            (", / .", "decrease / increase"),
+            ("Size", "a parameter; scales new bodies"),
+        ],
+    ),
+    ("Sandboxes", &[("1-9", "switch / create slot")]),
+    (
+        "General",
+        &[
+            ("? / h", "close this help"),
+            ("tab / space", "flip page"),
+            ("q / esc", "quit"),
+        ],
+    ),
+];
+
+fn draw_help(frame: &mut Frame, page: usize) {
+    let (groups, subtitle) = if page == 0 {
+        (HELP_PAGE_1, "1/2  interaction")
+    } else {
+        (HELP_PAGE_2, "2/2  world & sim")
+    };
+
+    let mut lines = vec![
+        Line::from(vec!["Controls   ".bold(), subtitle.dim()]),
+        Line::from(""),
+    ];
+    for &(title, binds) in groups {
         lines.push(Line::from(title.bold().cyan()));
-        for (key, desc) in binds {
-            lines.push(Line::from(format!("  {key:<14}{desc}")));
+        for &(key, desc) in binds {
+            lines.push(Line::from(format!("  {key:<13}{desc}")));
         }
         lines.push(Line::from(""));
     }
-    lines.push(Line::from("press ? or esc to close".dim()));
+    lines.push(Line::from("tab/space: flip page    ? or esc: close".dim()));
 
-    let width = 44u16;
+    let width = 58u16;
     let height = lines.len() as u16 + 2;
     let area = frame.area();
     let [_, mid, _] = Layout::vertical([

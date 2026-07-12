@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use nalgebra::Vector3;
@@ -28,6 +29,24 @@ pub const MAX_GRAVITY: f64 = 40.0;
 pub const MAX_FRICTION: f64 = 2.0;
 pub const MAX_RESTITUTION: f64 = 1.0;
 pub const MAX_DAMPING: f64 = 5.0;
+
+pub const DEFAULT_AMBIENT: f64 = 20.0;
+pub const MIN_AMBIENT: f64 = -50.0;
+pub const MAX_AMBIENT: f64 = 500.0;
+pub const DEFAULT_CONDUCTIVITY: f64 = 1.0;
+pub const MIN_CONDUCTIVITY: f64 = 0.0;
+pub const MAX_CONDUCTIVITY: f64 = 5.0;
+pub const DEFAULT_COOLING: f64 = 1.0;
+pub const MIN_COOLING: f64 = 0.0;
+pub const MAX_COOLING: f64 = 4.0;
+pub const HEAT_TOOL_DELTA: f64 = 45.0;
+const MIN_TEMP: f64 = -100.0;
+const MAX_TEMP: f64 = 2000.0;
+// Loss to the surrounding air, independent of conductivity, so heat lingers.
+const AMBIENT_LOSS: f64 = 0.04;
+const CONDUCTION_RATE: f64 = 2.5;
+const FRICTION_HEAT: f64 = 4.0;
+
 const WALL_HALF_HEIGHT: f32 = 3.0;
 const WALL_HALF_THICKNESS: f32 = 0.25;
 
@@ -107,6 +126,7 @@ pub struct BodyView {
     pub linvel: Vector3<f64>,
     pub speed: f64,
     pub mass: f64,
+    pub temp: f64,
     pub trail: Vec<Vector3<f64>>,
 }
 
@@ -146,7 +166,13 @@ pub struct PhysicsWorld {
     fluid: Fluid,
     nbody_state: HashMap<RigidBodyHandle, NBodyState>,
     dragging: Option<RigidBodyHandle>,
+    structures: HashSet<RigidBodyHandle>,
     container: Option<Container>,
+    thermo: bool,
+    ambient: f64,
+    conductivity: f64,
+    cooling: f64,
+    temps: HashMap<RigidBodyHandle, f64>,
 }
 
 struct Container {
@@ -191,7 +217,13 @@ impl PhysicsWorld {
             fluid: Fluid::new(),
             nbody_state: HashMap::new(),
             dragging: None,
+            structures: HashSet::new(),
             container: None,
+            thermo: false,
+            ambient: DEFAULT_AMBIENT,
+            conductivity: DEFAULT_CONDUCTIVITY,
+            cooling: DEFAULT_COOLING,
+            temps: HashMap::new(),
         };
         world.apply_materials();
         world
@@ -330,6 +362,18 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn has_container(&self) -> bool {
+        self.container.is_some()
+    }
+
+    pub fn toggle_container(&mut self, center: Vector3<f64>, half_extent: f64, wall_height: f64) {
+        if self.container.is_some() {
+            self.remove_container();
+        } else {
+            self.spawn_container(center, half_extent, wall_height);
+        }
+    }
+
     pub fn container_walls(&self) -> &[(Vector3<f64>, Vector3<f64>)] {
         self.container.as_ref().map_or(&[], |c| &c.walls)
     }
@@ -351,6 +395,9 @@ impl PhysicsWorld {
         match mode {
             GravityMode::NBody => {
                 for handle in handles {
+                    if self.structures.contains(&handle) {
+                        continue;
+                    }
                     if let Some(body) = self.bodies.get_mut(handle) {
                         let t = body.translation();
                         let lv = body.linvel();
@@ -366,7 +413,7 @@ impl PhysicsWorld {
             }
             GravityMode::Uniform => {
                 for handle in handles {
-                    if Some(handle) == self.dragging {
+                    if Some(handle) == self.dragging || self.structures.contains(&handle) {
                         continue;
                     }
                     let vel = self
@@ -480,6 +527,9 @@ impl PhysicsWorld {
         if self.floor_mode == FloorMode::Void {
             self.cull_fallen();
             self.fluid.cull_below(VOID_FALL_LIMIT as f64);
+        }
+        if self.thermo {
+            self.step_thermo(dt);
         }
         self.step_cloth(dt);
         self.step_fluid(dt);
@@ -681,8 +731,49 @@ impl PhysicsWorld {
                 pos,
                 Vector3::new(0.0, -fluid::EMIT_SPEED, 0.0),
                 fluid::EMIT_RADIUS,
+                self.ambient,
             );
         }
+    }
+
+    pub fn spawn_obstacle(&mut self, center: Vector3<f64>, half: Vector3<f64>) -> RigidBodyHandle {
+        self.spawn_static(center, half, 0.0)
+    }
+
+    pub fn spawn_ramp(
+        &mut self,
+        center: Vector3<f64>,
+        half: Vector3<f64>,
+        tilt: f64,
+    ) -> RigidBodyHandle {
+        self.spawn_static(center, half, tilt)
+    }
+
+    fn spawn_static(
+        &mut self,
+        center: Vector3<f64>,
+        half: Vector3<f64>,
+        tilt: f64,
+    ) -> RigidBodyHandle {
+        let handle = self.bodies.insert(
+            RigidBodyBuilder::fixed()
+                .translation(Vector::new(
+                    center.x as f32,
+                    center.y as f32,
+                    center.z as f32,
+                ))
+                .rotation(Vector::new(0.0, 0.0, tilt as f32)),
+        );
+        let collider = ColliderBuilder::cuboid(half.x as f32, half.y as f32, half.z as f32)
+            .friction(self.friction as f32)
+            .restitution(self.restitution as f32);
+        self.colliders
+            .insert_with_parent(collider, handle, &mut self.bodies);
+        self.order
+            .push((handle, BodyKind::Box { half_extents: half }));
+        self.structures.insert(handle);
+        self.temps.insert(handle, self.ambient);
+        handle
     }
 
     pub fn fluid_emitter_count(&self) -> usize {
@@ -727,6 +818,103 @@ impl PhysicsWorld {
 
     pub fn set_wind_strength(&mut self, s: f64) {
         self.wind_strength = s.clamp(0.0, MAX_WIND_STRENGTH);
+    }
+
+    pub fn thermo_enabled(&self) -> bool {
+        self.thermo
+    }
+
+    pub fn set_thermo(&mut self, on: bool) {
+        self.thermo = on;
+        self.fluid.set_thermo(on);
+        if on {
+            for &(h, _) in &self.order {
+                self.temps.entry(h).or_insert(self.ambient);
+            }
+        }
+    }
+
+    pub fn ambient(&self) -> f64 {
+        self.ambient
+    }
+
+    pub fn set_ambient(&mut self, t: f64) {
+        self.ambient = t.clamp(MIN_AMBIENT, MAX_AMBIENT);
+        self.fluid.set_ambient(self.ambient);
+    }
+
+    pub fn conductivity(&self) -> f64 {
+        self.conductivity
+    }
+
+    pub fn set_conductivity(&mut self, k: f64) {
+        self.conductivity = k.clamp(MIN_CONDUCTIVITY, MAX_CONDUCTIVITY);
+        self.fluid.set_conductivity(self.conductivity);
+    }
+
+    pub fn cooling(&self) -> f64 {
+        self.cooling
+    }
+
+    pub fn set_cooling(&mut self, c: f64) {
+        self.cooling = c.clamp(MIN_COOLING, MAX_COOLING);
+        self.fluid.set_cool_rate(self.cooling);
+    }
+
+    pub fn heat_fluid_near(&mut self, center: Vector3<f64>, radius: f64, delta: f64) {
+        self.fluid.add_heat_near(center, radius, delta);
+    }
+
+    pub fn set_fluid_floor_temp(&mut self, t: Option<f64>) {
+        self.fluid.set_floor_temp(t);
+    }
+
+    pub fn add_heat(&mut self, handle: RigidBodyHandle, delta: f64) {
+        if let Some(t) = self.temps.get_mut(&handle) {
+            *t = (*t + delta).clamp(MIN_TEMP, MAX_TEMP);
+        }
+    }
+
+    fn step_thermo(&mut self, dt: f64) {
+        let cool = (self.cooling * AMBIENT_LOSS * dt).clamp(0.0, 1.0);
+        for &(h, _) in &self.order {
+            let t = self.temps.entry(h).or_insert(self.ambient);
+            *t += (self.ambient - *t) * cool;
+        }
+
+        let mut pairs: Vec<(RigidBodyHandle, RigidBodyHandle)> = Vec::new();
+        for pair in self.narrow_phase.contact_pairs() {
+            if !pair.has_any_active_contact() {
+                continue;
+            }
+            if let (Some(a), Some(b)) = (
+                self.colliders.get(pair.collider1).and_then(|c| c.parent()),
+                self.colliders.get(pair.collider2).and_then(|c| c.parent()),
+            ) {
+                pairs.push((a, b));
+            }
+        }
+
+        let rate = (self.conductivity * CONDUCTION_RATE * dt).clamp(0.0, 1.0);
+        for (a, b) in pairs {
+            let (Some(&ta), Some(&tb)) = (self.temps.get(&a), self.temps.get(&b)) else {
+                continue;
+            };
+            let (Some(ba), Some(bb)) = (self.bodies.get(a), self.bodies.get(b)) else {
+                continue;
+            };
+            let (ma, mb) = (ba.mass() as f64, bb.mass() as f64);
+            let dv = ba.linvel() - bb.linvel();
+            let vrel = (dv.x * dv.x + dv.y * dv.y + dv.z * dv.z).sqrt() as f64;
+            let mean = (ma * ta + mb * tb) / (ma + mb);
+            let gain = FRICTION_HEAT * self.friction * vrel * dt;
+            if let Some(t) = self.temps.get_mut(&a) {
+                *t = (*t + (mean - ta) * rate + gain).clamp(MIN_TEMP, MAX_TEMP);
+            }
+            if let Some(t) = self.temps.get_mut(&b) {
+                *t = (*t + (mean - tb) * rate + gain).clamp(MIN_TEMP, MAX_TEMP);
+            }
+        }
     }
 
     pub fn toggle_cloth_pin_near(
@@ -845,7 +1033,7 @@ impl PhysicsWorld {
             pos.push(p);
             vel.push(st.vel);
             mass.push(st.mass);
-            integrated.push(!dragged);
+            integrated.push(!dragged && !self.structures.contains(&h));
         }
 
         let accel = |positions: &[Vector3<f64>]| -> Vec<Vector3<f64>> {
@@ -945,6 +1133,17 @@ impl PhysicsWorld {
         linvel: Vector3<f64>,
         mass: f64,
     ) -> RigidBodyHandle {
+        self.spawn_scaled(kind, pos, linvel, mass, 1.0)
+    }
+
+    pub fn spawn_scaled(
+        &mut self,
+        kind: SpawnKind,
+        pos: Vector3<f64>,
+        linvel: Vector3<f64>,
+        mass: f64,
+        scale: f64,
+    ) -> RigidBodyHandle {
         let handle = self.bodies.insert(
             RigidBodyBuilder::dynamic()
                 .translation(Vector::new(pos.x as f32, pos.y as f32, pos.z as f32))
@@ -957,27 +1156,27 @@ impl PhysicsWorld {
                 .linear_damping(self.damping as f32),
         );
 
+        let s = scale as f32;
         let (collider, body_kind) = match kind {
-            SpawnKind::Box => (
-                ColliderBuilder::cuboid(BOX_HALF_EXTENT, BOX_HALF_EXTENT, BOX_HALF_EXTENT),
-                BodyKind::Box {
-                    half_extents: Vector3::new(
-                        BOX_HALF_EXTENT as f64,
-                        BOX_HALF_EXTENT as f64,
-                        BOX_HALF_EXTENT as f64,
-                    ),
-                },
-            ),
+            SpawnKind::Box => {
+                let h = BOX_HALF_EXTENT * s;
+                (
+                    ColliderBuilder::cuboid(h, h, h),
+                    BodyKind::Box {
+                        half_extents: Vector3::new(h as f64, h as f64, h as f64),
+                    },
+                )
+            }
             SpawnKind::Sphere => (
-                ColliderBuilder::ball(SPHERE_RADIUS),
+                ColliderBuilder::ball(SPHERE_RADIUS * s),
                 BodyKind::Sphere {
-                    radius: SPHERE_RADIUS as f64,
+                    radius: (SPHERE_RADIUS * s) as f64,
                 },
             ),
             SpawnKind::Star => (
-                ColliderBuilder::ball(STAR_RADIUS),
+                ColliderBuilder::ball(STAR_RADIUS * s),
                 BodyKind::Star {
-                    radius: STAR_RADIUS as f64,
+                    radius: (STAR_RADIUS * s) as f64,
                 },
             ),
         };
@@ -988,6 +1187,7 @@ impl PhysicsWorld {
         self.colliders
             .insert_with_parent(collider, handle, &mut self.bodies);
         self.order.push((handle, body_kind));
+        self.temps.insert(handle, self.ambient);
         if self.gravity_mode == GravityMode::NBody {
             if let Some(body) = self.bodies.get_mut(handle) {
                 body.set_body_type(RigidBodyType::KinematicPositionBased, true);
@@ -1002,15 +1202,6 @@ impl PhysicsWorld {
             );
         }
         handle
-    }
-
-    pub fn spawn_star(
-        &mut self,
-        pos: Vector3<f64>,
-        linvel: Vector3<f64>,
-        mass: f64,
-    ) -> RigidBodyHandle {
-        self.spawn_with_velocity(SpawnKind::Star, pos, linvel, mass)
     }
 
     pub fn body_translation(&self, handle: RigidBodyHandle) -> Option<Vector3<f64>> {
@@ -1091,6 +1282,8 @@ impl PhysicsWorld {
     pub fn remove(&mut self, handle: RigidBodyHandle) {
         self.trails.remove(&handle);
         self.nbody_state.remove(&handle);
+        self.temps.remove(&handle);
+        self.structures.remove(&handle);
         if self.dragging == Some(handle) {
             self.dragging = None;
         }
@@ -1112,6 +1305,9 @@ impl PhysicsWorld {
         self.cloths.clear();
         self.fluid.clear();
         self.nbody_state.clear();
+        self.temps.clear();
+        self.structures.clear();
+        self.remove_container();
         self.dragging = None;
     }
 
@@ -1155,6 +1351,7 @@ impl PhysicsWorld {
                     linvel,
                     speed: linvel.norm(),
                     mass,
+                    temp: self.temps.get(&handle).copied().unwrap_or(self.ambient),
                     trail: self
                         .trails
                         .get(&handle)
@@ -1321,6 +1518,70 @@ mod fluid_integration {
 }
 
 #[cfg(test)]
+mod structures_integration {
+    use super::*;
+
+    #[test]
+    fn spawn_scale_changes_body_size() {
+        let mut w = PhysicsWorld::new();
+        let small = w.spawn_scaled(
+            SpawnKind::Sphere,
+            Vector3::new(-2.0, 1.0, 0.0),
+            Vector3::zeros(),
+            5.0,
+            0.5,
+        );
+        let big = w.spawn_scaled(
+            SpawnKind::Sphere,
+            Vector3::new(2.0, 1.0, 0.0),
+            Vector3::zeros(),
+            5.0,
+            2.0,
+        );
+        let radius = |h| {
+            w.render_bodies()
+                .into_iter()
+                .find(|b| b.handle == h)
+                .map(|b| match b.kind {
+                    BodyKind::Sphere { radius } => radius,
+                    _ => panic!("expected a sphere"),
+                })
+                .unwrap()
+        };
+        let (rs, rb) = (radius(small), radius(big));
+        assert!(rb > rs * 3.0, "scale did not size the bodies: {rs} vs {rb}");
+    }
+
+    #[test]
+    fn placed_platform_stays_put_across_gravity_modes() {
+        let mut w = PhysicsWorld::new();
+        let center = Vector3::new(0.0, 0.5, 0.0);
+        let platform = w.spawn_obstacle(center, Vector3::new(1.1, 0.15, 1.1));
+        let ball = w.spawn(SpawnKind::Sphere, Vector3::new(0.0, 3.0, 0.0), 5.0);
+
+        w.set_gravity_mode(GravityMode::NBody);
+        for _ in 0..120 {
+            w.step(1.0 / 60.0);
+        }
+        w.set_gravity_mode(GravityMode::Uniform);
+        for _ in 0..300 {
+            w.step(1.0 / 60.0);
+        }
+
+        let p = w.body_translation(platform).unwrap();
+        assert!(
+            (p - center).norm() < 1e-3,
+            "static platform drifted after a gravity-mode round trip: {p:?}"
+        );
+        let b = w.body_translation(ball).unwrap();
+        assert!(
+            b.iter().all(|x| x.is_finite()),
+            "ball diverged after mode switching"
+        );
+    }
+}
+
+#[cfg(test)]
 mod nbody_integration {
     use super::*;
 
@@ -1339,7 +1600,8 @@ mod nbody_integration {
             ((0.0, 0.0), (-0.932_407_37, -0.864_731_46)),
         ];
         for ((px, pz), (vx, vz)) in bodies {
-            w.spawn_star(
+            w.spawn_with_velocity(
+                SpawnKind::Star,
                 Vector3::new(px * SCALE, 0.0, pz * SCALE),
                 Vector3::new(vx * v_scale, 0.0, vz * v_scale),
                 MASS,
@@ -1381,5 +1643,101 @@ mod nbody_integration {
             ((e1 - e0) / e0).abs() < 0.02,
             "energy drifted: {e0} -> {e1}"
         );
+    }
+}
+
+#[cfg(test)]
+mod thermo_integration {
+    use super::*;
+
+    fn temp_of(w: &PhysicsWorld, h: RigidBodyHandle) -> f64 {
+        w.render_bodies()
+            .into_iter()
+            .find(|b| b.handle == h)
+            .map(|b| b.temp)
+            .unwrap()
+    }
+
+    #[test]
+    fn cooling_relaxes_body_to_ambient() {
+        let mut w = PhysicsWorld::new();
+        w.set_thermo(true);
+        w.set_ambient(20.0);
+        w.set_conductivity(2.0);
+        let h = w.spawn(SpawnKind::Box, Vector3::new(0.0, 0.5, 0.0), 20.0);
+        w.add_heat(h, 480.0);
+        assert!(temp_of(&w, h) > 400.0, "heat tool did not warm the body");
+
+        // Heat now lingers: it should still be clearly hot after 30s...
+        for _ in 0..1800 {
+            w.step(1.0 / 60.0);
+        }
+        assert!(
+            temp_of(&w, h) > 100.0,
+            "body cooled far too fast to feel dramatic"
+        );
+
+        // ...but still relax back to ambient given enough time.
+        for _ in 0..9000 {
+            w.step(1.0 / 60.0);
+        }
+        let t = temp_of(&w, h);
+        assert!(t.is_finite(), "temperature diverged");
+        assert!(
+            (t - 20.0).abs() < 5.0,
+            "body did not cool back to ambient: {t}"
+        );
+    }
+
+    #[test]
+    fn cooling_rate_controls_how_fast_heat_fades() {
+        let run = |cooling: f64| {
+            let mut w = PhysicsWorld::new();
+            w.set_thermo(true);
+            w.set_ambient(20.0);
+            w.set_cooling(cooling);
+            let h = w.spawn(SpawnKind::Box, Vector3::new(0.0, 0.5, 0.0), 20.0);
+            w.add_heat(h, 480.0);
+            for _ in 0..1800 {
+                w.step(1.0 / 60.0);
+            }
+            temp_of(&w, h)
+        };
+
+        let frozen = run(0.0);
+        let slow = run(1.0);
+        let fast = run(4.0);
+        assert!(frozen > 490.0, "cooling 0x should keep heat: {frozen}");
+        assert!(
+            slow < frozen && fast < slow,
+            "higher cooling must fade faster"
+        );
+    }
+
+    #[test]
+    fn touching_bodies_conduct_heat() {
+        let mut w = PhysicsWorld::new();
+        w.set_thermo(true);
+        w.set_ambient(20.0);
+        w.set_conductivity(4.0);
+        let bottom = w.spawn(SpawnKind::Box, Vector3::new(0.0, 0.5, 0.0), 20.0);
+        let top = w.spawn(SpawnKind::Box, Vector3::new(0.0, 1.5, 0.0), 20.0);
+
+        for _ in 0..60 {
+            w.step(1.0 / 60.0);
+        }
+        w.add_heat(top, 800.0);
+        for _ in 0..120 {
+            w.step(1.0 / 60.0);
+        }
+
+        let bt = temp_of(&w, bottom);
+        let tt = temp_of(&w, top);
+        assert!(bt.is_finite() && tt.is_finite(), "temperature diverged");
+        assert!(
+            bt > 40.0,
+            "bottom box received no conducted heat from the hot box on top: {bt}"
+        );
+        assert!(tt < 800.0, "top box lost no heat to conduction: {tt}");
     }
 }

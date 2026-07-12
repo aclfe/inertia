@@ -32,9 +32,9 @@ const OPTIONS: [(&str, &str, Scene); 5] = [
         Scene::Cloth,
     ),
     (
-        "Fluid demo",
-        "a splash cascade into a rectangular tank",
-        Scene::Fluid,
+        "Thermal demo",
+        "a hot floor drives convection in a tank of water",
+        Scene::Thermal,
     ),
 ];
 
