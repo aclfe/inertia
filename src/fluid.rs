@@ -30,6 +30,17 @@ const CLOTH_COUPLE_FRICTION: f64 = 0.5;
 const COLLISION_MARGIN: f64 = 0.02;
 pub const MAX_PARTICLES: usize = 12000;
 
+const DEFAULT_AMBIENT: f64 = 20.0;
+const FLUID_DIFFUSE: f64 = 3.0;
+// Bulk loss to ambient, independent of conductivity, so hot water stays hot longer.
+const FLUID_COOL: f64 = 0.8;
+const FLOOR_BAND: f64 = 0.4;
+const FLOOR_HOT_RADIUS: f64 = 1.1;
+const FLOOR_HEAT: f64 = 10.0;
+const BUOYANCY: f64 = 0.0035;
+const MIN_TEMP: f64 = -100.0;
+const MAX_TEMP: f64 = 2000.0;
+
 pub const EMIT_SPEED: f64 = 3.0;
 pub const EMIT_RADIUS: f64 = 0.4;
 const MIN_SPAWN_SPACING: f64 = 0.75;
@@ -134,12 +145,14 @@ struct Emitter {
     pos: Vector3<f64>,
     vel: Vector3<f64>,
     radius: f64,
+    temp: f64,
 }
 
 pub struct FluidView {
     pub positions: Vec<Vector3<f64>>,
     pub speeds: Vec<f64>,
     pub density_ratio: Vec<f64>,
+    pub temps: Vec<f64>,
     pub emitters: Vec<Vector3<f64>>,
 }
 
@@ -148,6 +161,12 @@ pub struct Fluid {
     vel: Vec<Vector3<f64>>,
     density: Vec<f64>,
     pressure: Vec<f64>,
+    temp: Vec<f64>,
+    thermo: bool,
+    ambient: f64,
+    conductivity: f64,
+    cool_rate: f64,
+    floor_temp: Option<f64>,
     viscosity: f64,
     emitters: Vec<Emitter>,
     grid: Grid,
@@ -192,6 +211,12 @@ impl Fluid {
             vel: Vec::new(),
             density: Vec::new(),
             pressure: Vec::new(),
+            temp: Vec::new(),
+            thermo: false,
+            ambient: DEFAULT_AMBIENT,
+            conductivity: 1.0,
+            cool_rate: 1.0,
+            floor_temp: None,
             viscosity: DEFAULT_VISCOSITY,
             emitters: Vec::new(),
             grid: Grid::default(),
@@ -227,7 +252,7 @@ impl Fluid {
                             j as f64 * SPACING + jitter(j, k, i),
                             k as f64 * SPACING + jitter(k, i, j),
                         );
-                    self.push_particle(p, Vector3::zeros());
+                    self.push_particle(p, Vector3::zeros(), self.ambient);
                 }
             }
         }
@@ -247,15 +272,20 @@ impl Fluid {
                     }
                     let p = center + off;
                     if !self.too_crowded(p) {
-                        self.push_particle(p, Vector3::new(0.0, -1.0, 0.0));
+                        self.push_particle(p, Vector3::new(0.0, -1.0, 0.0), self.ambient);
                     }
                 }
             }
         }
     }
 
-    pub fn add_emitter(&mut self, pos: Vector3<f64>, vel: Vector3<f64>, radius: f64) {
-        self.emitters.push(Emitter { pos, vel, radius });
+    pub fn add_emitter(&mut self, pos: Vector3<f64>, vel: Vector3<f64>, radius: f64, temp: f64) {
+        self.emitters.push(Emitter {
+            pos,
+            vel,
+            radius,
+            temp,
+        });
     }
 
     pub fn remove_emitter_near(&mut self, point: Vector3<f64>, threshold: f64) -> bool {
@@ -295,18 +325,19 @@ impl Fluid {
                     }
                     let p = e.pos + off;
                     if !self.too_crowded(p) {
-                        self.push_particle(p, e.vel);
+                        self.push_particle(p, e.vel, e.temp);
                     }
                 }
             }
         }
     }
 
-    fn push_particle(&mut self, p: Vector3<f64>, vel: Vector3<f64>) {
+    fn push_particle(&mut self, p: Vector3<f64>, vel: Vector3<f64>, temp: f64) {
         self.pos.push(p);
         self.vel.push(vel);
         self.density.push(self.rest_density);
         self.pressure.push(0.0);
+        self.temp.push(temp);
     }
 
     fn too_crowded(&self, p: Vector3<f64>) -> bool {
@@ -319,6 +350,7 @@ impl Fluid {
         self.vel.clear();
         self.density.clear();
         self.pressure.clear();
+        self.temp.clear();
         self.emitters.clear();
     }
 
@@ -330,8 +362,38 @@ impl Fluid {
                 self.vel.swap_remove(i);
                 self.density.swap_remove(i);
                 self.pressure.swap_remove(i);
+                self.temp.swap_remove(i);
             } else {
                 i += 1;
+            }
+        }
+    }
+
+    pub fn set_thermo(&mut self, on: bool) {
+        self.thermo = on;
+    }
+
+    pub fn set_ambient(&mut self, t: f64) {
+        self.ambient = t;
+    }
+
+    pub fn set_conductivity(&mut self, k: f64) {
+        self.conductivity = k;
+    }
+
+    pub fn set_cool_rate(&mut self, r: f64) {
+        self.cool_rate = r;
+    }
+
+    pub fn set_floor_temp(&mut self, t: Option<f64>) {
+        self.floor_temp = t;
+    }
+
+    pub fn add_heat_near(&mut self, center: Vector3<f64>, radius: f64, delta: f64) {
+        let r2 = radius * radius;
+        for i in 0..self.pos.len() {
+            if (self.pos[i] - center).norm_squared() < r2 {
+                self.temp[i] = (self.temp[i] + delta).clamp(MIN_TEMP, MAX_TEMP);
             }
         }
     }
@@ -365,6 +427,7 @@ impl Fluid {
                 .iter()
                 .map(|&d| d / self.rest_density)
                 .collect(),
+            temps: self.temp.clone(),
             emitters: self.emitters.iter().map(|e| e.pos).collect(),
         }
     }
@@ -397,6 +460,7 @@ impl Fluid {
             }
             self.collide_bodies(bodies, &mut contact);
         }
+        self.step_thermal(dt, ground_y);
 
         let mut reactions = self.buoyancy_reactions(bodies, dt, -gravity.y);
         for (bi, body) in bodies.iter().enumerate() {
@@ -617,7 +681,10 @@ impl Fluid {
 
     fn integrate(&mut self, h: f64, gravity: Vector3<f64>) {
         for i in 0..self.pos.len() {
-            let accel = self.forces[i] / self.density[i] + gravity;
+            let mut accel = self.forces[i] / self.density[i] + gravity;
+            if self.thermo {
+                accel += -gravity * (BUOYANCY * (self.temp[i] - self.ambient));
+            }
             let mut v = self.vel[i] + accel * h;
             let speed = v.norm();
             if speed > MAX_SPEED {
@@ -625,6 +692,55 @@ impl Fluid {
             }
             self.vel[i] = v;
             self.pos[i] += v * h;
+        }
+    }
+
+    fn step_thermal(&mut self, dt: f64, ground_y: f64) {
+        if !self.thermo {
+            return;
+        }
+        let n = self.pos.len();
+        let diffuse = (self.conductivity * FLUID_DIFFUSE * dt).clamp(0.0, 1.0);
+        let cool = (self.cool_rate * FLUID_COOL * dt).clamp(0.0, 1.0);
+        let floor_rate = (FLOOR_HEAT * dt).clamp(0.0, 1.0);
+
+        let (pos, nbr, count, temp) = (&self.pos, &self.nbr, &self.nbr_count, &self.temp);
+        let mut smoothed = temp.clone();
+        for i in 0..n {
+            let pi = pos[i];
+            let ti = temp[i];
+            let mut wsum = 0.0;
+            let mut tsum = 0.0;
+            for &jj in &nbr[i * MAX_NBR..i * MAX_NBR + count[i] as usize] {
+                let j = jj as usize;
+                let r = (pos[j] - pi).norm();
+                if !(1e-9..H).contains(&r) {
+                    continue;
+                }
+                let w = H - r;
+                wsum += w;
+                tsum += w * temp[j];
+            }
+            if wsum > 0.0 {
+                smoothed[i] = ti + (tsum / wsum - ti) * diffuse;
+            }
+        }
+        self.temp = smoothed;
+
+        let band = ground_y + FLOOR_BAND;
+        for i in 0..n {
+            let t = &mut self.temp[i];
+            *t += (self.ambient - *t) * cool;
+            if let Some(hot) = self.floor_temp {
+                let p = self.pos[i];
+                if ground_y.is_finite()
+                    && p.y <= band
+                    && p.x * p.x + p.z * p.z <= FLOOR_HOT_RADIUS * FLOOR_HOT_RADIUS
+                {
+                    *t += (hot - *t) * floor_rate;
+                }
+            }
+            *t = t.clamp(MIN_TEMP, MAX_TEMP);
         }
     }
 
@@ -765,6 +881,42 @@ mod tests {
     }
 
     #[test]
+    fn hot_floor_drives_convection() {
+        let mut fluid = Fluid::new();
+        fluid.spawn_block(Vector3::new(0.0, 1.0, 0.0), Vector3::new(1.4, 0.9, 1.4));
+        fluid.set_thermo(true);
+        fluid.set_ambient(20.0);
+        fluid.set_conductivity(1.0);
+        fluid.set_floor_temp(Some(240.0));
+
+        let mut peak_vy = f64::MIN;
+        for _ in 0..300 {
+            fluid.step(DT, GRAVITY, GROUND, f64::INFINITY, &[], None);
+            peak_vy = peak_vy.max(fluid.vel.iter().map(|v| v.y).fold(f64::MIN, f64::max));
+        }
+
+        assert!(all_finite(&fluid), "thermal fluid diverged");
+        let max_temp = fluid.temp.iter().cloned().fold(f64::MIN, f64::max);
+        let min_temp = fluid.temp.iter().cloned().fold(f64::MAX, f64::min);
+        assert!(
+            max_temp > 150.0,
+            "the hot floor never heated the pool: max temp {max_temp}"
+        );
+        assert!(
+            min_temp < 80.0,
+            "the pool homogenized; no convective gradient survived: min temp {min_temp}"
+        );
+        assert!(
+            fluid.temp.iter().all(|&t| (-100.0..=2000.0).contains(&t)),
+            "temperature left its bounds"
+        );
+        assert!(
+            peak_vy > 0.5,
+            "buoyancy never lifted the hot fluid (no convection): peak vy {peak_vy}"
+        );
+    }
+
+    #[test]
     fn block_settles_on_floor_without_exploding() {
         let mut fluid = Fluid::new();
         fluid.spawn_block(Vector3::new(0.0, 2.0, 0.0), Vector3::new(1.5, 1.5, 1.5));
@@ -840,6 +992,7 @@ mod tests {
                 fluid.push_particle(
                     Vector3::new(i as f64 * SPACING, 0.15, j as f64 * SPACING),
                     Vector3::new(0.0, -2.0, 0.0),
+                    DEFAULT_AMBIENT,
                 );
             }
         }
