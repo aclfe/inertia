@@ -1,11 +1,8 @@
 use nalgebra::Vector3;
 use rapier3d::prelude::RigidBodyHandle;
 
-use ratatui::crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
-
 use crate::app::{App, MAX_SPAWN_MASS, MIN_SPAWN_MASS, SPAWN_DROP_HEIGHT, StructureKind, Tool};
+use crate::event::{Button, Key, KeyInput, MouseInput, MouseKind};
 use crate::physics::{G, GravityMode, HEAT_TOOL_DELTA, SpawnKind};
 
 const ORBIT_STEP: f64 = 0.08;
@@ -14,96 +11,93 @@ const ZOOM_FACTOR: f64 = 1.1;
 const SELECT_THRESHOLD: f64 = 0.08;
 const MASS_FACTOR: f64 = 2.0;
 
-pub fn handle_key(app: &mut App, key: KeyEvent) {
-    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+pub fn handle_key(app: &mut App, key: KeyInput) {
+    let shift = key.shift;
 
     if app.show_help {
-        match key.code {
-            KeyCode::Char('?') | KeyCode::Char('h') | KeyCode::Esc | KeyCode::Char('q') => {
+        match key.key {
+            Key::Char('?') | Key::Char('h') | Key::Esc | Key::Char('q') => {
                 app.show_help = false;
             }
-            KeyCode::Tab
-            | KeyCode::Char(' ')
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Char('n')
-            | KeyCode::Char('p') => app.flip_help_page(),
+            Key::Tab | Key::Char(' ') | Key::Left | Key::Right | Key::Char('n') | Key::Char('p') => {
+                app.flip_help_page()
+            }
             _ => {}
         }
         return;
     }
 
-    match key.code {
-        KeyCode::Char('?') | KeyCode::Char('h') => app.toggle_help(),
-        KeyCode::Char('q') | KeyCode::Esc => app.running = false,
-        KeyCode::Char('r') => app.camera.reset(),
-        KeyCode::Char('+') | KeyCode::Char('=') => app.camera.zoom(1.0 / ZOOM_FACTOR),
-        KeyCode::Char('-') => app.camera.zoom(ZOOM_FACTOR),
-        KeyCode::Left if shift => app.camera.pan(-PAN_STEP, 0.0),
-        KeyCode::Right if shift => app.camera.pan(PAN_STEP, 0.0),
-        KeyCode::Up if shift => app.camera.pan(0.0, PAN_STEP),
-        KeyCode::Down if shift => app.camera.pan(0.0, -PAN_STEP),
-        KeyCode::Left => app.camera.orbit(-ORBIT_STEP, 0.0),
-        KeyCode::Right => app.camera.orbit(ORBIT_STEP, 0.0),
-        KeyCode::Up => app.camera.orbit(0.0, -ORBIT_STEP),
-        KeyCode::Down => app.camera.orbit(0.0, ORBIT_STEP),
-        KeyCode::Char('b') => select_spawn(app, SpawnKind::Box),
-        KeyCode::Char('s') => select_spawn(app, SpawnKind::Sphere),
-        KeyCode::Char('n') => select_spawn(app, SpawnKind::Star),
-        KeyCode::Char('x') => {
+    match key.key {
+        Key::Char('?') | Key::Char('h') => app.toggle_help(),
+        Key::Char('q') | Key::Esc => app.running = false,
+        Key::Char('r') => app.camera.reset(),
+        Key::Char('+') | Key::Char('=') => app.camera.zoom(1.0 / ZOOM_FACTOR),
+        Key::Char('-') => app.camera.zoom(ZOOM_FACTOR),
+        Key::Left if shift => app.camera.pan(-PAN_STEP, 0.0),
+        Key::Right if shift => app.camera.pan(PAN_STEP, 0.0),
+        Key::Up if shift => app.camera.pan(0.0, PAN_STEP),
+        Key::Down if shift => app.camera.pan(0.0, -PAN_STEP),
+        Key::Left => app.camera.orbit(-ORBIT_STEP, 0.0),
+        Key::Right => app.camera.orbit(ORBIT_STEP, 0.0),
+        Key::Up => app.camera.orbit(0.0, -ORBIT_STEP),
+        Key::Down => app.camera.orbit(0.0, ORBIT_STEP),
+        Key::Char('b') => select_spawn(app, SpawnKind::Box),
+        Key::Char('s') => select_spawn(app, SpawnKind::Sphere),
+        Key::Char('n') => select_spawn(app, SpawnKind::Star),
+        Key::Char('x') => {
             if let Some(handle) = app.selected.take() {
                 app.physics.remove(handle);
             }
         }
-        KeyCode::Char('X') => app.clear(),
-        KeyCode::Char(' ') => app.toggle_pause(),
-        KeyCode::Char('m') => app.request_step(),
-        KeyCode::Char(';') => app.cycle_tunable(),
-        KeyCode::Char(',') => app.adjust_tunable(false),
-        KeyCode::Char('.') => app.adjust_tunable(true),
-        KeyCode::Tab => cycle_selection(app, !shift),
-        KeyCode::Char('f') => {
+        Key::Char('X') => app.clear(),
+        Key::Char(' ') => app.toggle_pause(),
+        Key::Char('m') => app.request_step(),
+        Key::Char(';') => app.cycle_tunable(),
+        Key::Char(',') => app.adjust_tunable(false),
+        Key::Char('.') => app.adjust_tunable(true),
+        Key::Tab => cycle_selection(app, !shift),
+        Key::Char('f') => {
             let next = app.physics.floor_mode().next();
             app.physics.set_floor_mode(next);
         }
-        KeyCode::Char('g') => toggle_gravity_mode(app),
-        KeyCode::Char('a') => {
+        Key::Char('g') => toggle_gravity_mode(app),
+        Key::Char('a') => {
             let next = app.physics.nbody_algo().next();
             app.physics.set_nbody_algo(next);
         }
-        KeyCode::Char('d') => app.cycle_tool(),
-        KeyCode::Char('c') => app.color_mode = app.color_mode.next(),
-        KeyCode::Char('t') => {
+        Key::Char('d') => app.cycle_tool(),
+        Key::Char('c') => app.color_mode = app.color_mode.next(),
+        Key::Char('t') => {
             let on = !app.physics.show_trails();
             app.physics.set_show_trails(on);
         }
-        KeyCode::Char('k') => {
+        Key::Char('k') => {
             let y = 3.5 + app.physics.cloth_count() as f64 * 1.0;
             app.physics.spawn_cloth(Vector3::new(0.0, y, 0.0));
         }
-        KeyCode::Char('l') => {
+        Key::Char('l') => {
             let y = 3.5 + app.physics.cloth_count() as f64 * 1.0;
             app.physics
                 .spawn_cloth_hammock(Vector3::new(0.0, y, 0.0), 0.9);
         }
-        KeyCode::Char('K') => {
+        Key::Char('K') => {
             app.physics.remove_cloth();
             app.cloth_grab = None;
         }
-        KeyCode::Char('j') => {
+        Key::Char('j') => {
             app.physics
                 .spawn_fluid_block(Vector3::new(0.0, 3.0, 0.0), Vector3::new(1.3, 0.7, 1.3));
         }
-        KeyCode::Char('J') => app.physics.clear_fluid(),
-        KeyCode::Char('o') => {
+        Key::Char('J') => app.physics.clear_fluid(),
+        Key::Char('o') => {
             app.physics.toggle_container(
                 Vector3::new(0.0, 0.0, 0.0),
                 TANK_HALF_EXTENT,
                 TANK_WALL_HEIGHT,
             );
         }
-        KeyCode::Char('w') => app.physics.toggle_wind(),
-        KeyCode::Char('e') => {
+        Key::Char('w') => app.physics.toggle_wind(),
+        Key::Char('e') => {
             use crate::render::ColorMode;
             let on = !app.physics.thermo_enabled();
             app.physics.set_thermo(on);
@@ -112,13 +106,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             }
             app.ensure_tunable_applicable();
         }
-        KeyCode::Char(c @ '1'..='9') => {
+        Key::Char(c @ '1'..='9') => {
             app.switch_sandbox(c as usize - '1' as usize);
         }
-        KeyCode::Char('[') => {
+        Key::Char('[') => {
             app.spawn_mass = (app.spawn_mass / MASS_FACTOR).clamp(MIN_SPAWN_MASS, MAX_SPAWN_MASS);
         }
-        KeyCode::Char(']') => {
+        Key::Char(']') => {
             app.spawn_mass = (app.spawn_mass * MASS_FACTOR).clamp(MIN_SPAWN_MASS, MAX_SPAWN_MASS);
         }
         _ => {}
@@ -152,25 +146,25 @@ fn toggle_gravity_mode(app: &mut App) {
     }
 }
 
-pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
-    let (col, row) = (mouse.column, mouse.row);
+pub fn handle_mouse(app: &mut App, mouse: MouseInput) {
+    let (col, row) = (mouse.col, mouse.row);
     match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => match app.tool {
+        MouseKind::Down(Button::Left) => match app.tool {
             Tool::Place => spawn_at_cursor(app, col, row),
             Tool::Grab => begin_grab(app, col, row),
             Tool::Fluid => pour_fluid(app, col, row),
             Tool::Heat => heat_at_cursor(app, col, row, true),
             Tool::Build => build_at_cursor(app, col, row),
         },
-        MouseEventKind::Drag(MouseButton::Left) => match app.tool {
+        MouseKind::Drag(Button::Left) => match app.tool {
             Tool::Fluid => pour_fluid(app, col, row),
             Tool::Heat => heat_at_cursor(app, col, row, true),
             Tool::Build => {}
             _ => update_grab(app, col, row),
         },
-        MouseEventKind::Up(MouseButton::Left) => app.release_grab(),
-        MouseEventKind::Moved => app.release_grab(),
-        MouseEventKind::Down(MouseButton::Right) => {
+        MouseKind::Up(Button::Left) => app.release_grab(),
+        MouseKind::Moved => app.release_grab(),
+        MouseKind::Down(Button::Right) => {
             if app.tool == Tool::Fluid {
                 toggle_fluid_source(app, col, row);
             } else if app.tool == Tool::Heat {
@@ -181,7 +175,7 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) {
                 select_at_cursor(app, col, row);
             }
         }
-        MouseEventKind::Down(MouseButton::Middle) => launch_at_cursor(app, col, row),
+        MouseKind::Down(Button::Middle) => launch_at_cursor(app, col, row),
         _ => {}
     }
 }

@@ -1,1 +1,4 @@
 /target
+/dist
+# Built by the Pages workflow (trunk build --dist site/demo); not committed.
+/site/demo

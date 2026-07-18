@@ -1,18 +1,15 @@
-mod app;
-mod cloth;
-mod collider;
-mod fluid;
-mod input;
-mod menu;
-mod nbody;
-mod physics;
-mod render;
-
+#[cfg(not(target_arch = "wasm32"))]
 use std::io;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+#[cfg(not(target_arch = "wasm32"))]
 use ratatui::crossterm::execute;
 
+#[cfg(not(target_arch = "wasm32"))]
+use inertia_tui::{app, menu};
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
@@ -29,4 +26,11 @@ fn main() {
         eprintln!("error: {err}");
         std::process::exit(1);
     }
+}
+
+// On wasm the same binary is the browser entry: trunk builds it and calls `main`,
+// which boots the ratzilla sandbox (see `src/web.rs`).
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    inertia_tui::web::run();
 }

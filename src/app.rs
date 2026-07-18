@@ -1,17 +1,25 @@
 use std::collections::VecDeque;
-use std::io;
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use nalgebra::Vector3;
 use rapier3d::prelude::RigidBodyHandle;
-use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, Event};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::io;
+#[cfg(not(target_arch = "wasm32"))]
+use ratatui::DefaultTerminal;
+#[cfg(not(target_arch = "wasm32"))]
+use ratatui::crossterm::event::{self, Event};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::input;
+
 use crate::physics::{FloorMode, GravityMode, NBodyAlgo, PhysicsWorld, SpawnKind};
-use crate::render::{self, ColorMode, Layout3D, camera::Camera, projection::Projection};
+use crate::render::{ColorMode, Layout3D, camera::Camera, projection::Projection};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::render;
 
 const PHYSICS_DT: f64 = 1.0 / 60.0;
+#[cfg(not(target_arch = "wasm32"))]
 const RENDER_INTERVAL: Duration = Duration::from_millis(33);
 const MAX_CATCHUP_STEPS: u32 = 5;
 const PHYSICS_BUDGET: Duration = Duration::from_millis(20);
@@ -205,6 +213,7 @@ pub enum Scene {
     RigidStack,
     ThreeBody,
     Cloth,
+    Fluid,
     Thermal,
 }
 
@@ -223,13 +232,32 @@ impl SandboxState {
             Scene::RigidStack => Self::rigid_stack(),
             Scene::ThreeBody => Self::three_body(),
             Scene::Cloth => Self::cloth_demo(),
+            Scene::Fluid => Self::fluid_demo(),
             Scene::Thermal => Self::thermal_demo(),
+        }
+    }
+
+    fn fluid_demo() -> Self {
+        let mut physics = PhysicsWorld::new();
+        physics.spawn_container(Vector3::new(0.0, 0.0, 0.0), 2.4, 3.0);
+        physics.spawn_fluid_block(Vector3::new(0.0, 1.2, 0.0), Vector3::new(2.25, 1.2, 2.25));
+        physics.spawn(SpawnKind::Sphere, Vector3::new(-1.0, 5.0, 0.0), 15.0);
+        physics.spawn(SpawnKind::Box, Vector3::new(0.9, 8.0, 0.6), 40.0);
+        let floater = physics.spawn(SpawnKind::Sphere, Vector3::new(0.0, 11.0, -0.8), 3.0);
+        Self {
+            physics,
+            spawn_kind: SpawnKind::Box,
+            spawn_mass: 30.0,
+            color_mode: ColorMode::Velocity,
+            selected: Some(floater),
         }
     }
 
     fn thermal_demo() -> Self {
         let mut physics = PhysicsWorld::new();
-        physics.set_ambient(20.0);
+        physics.set_ambient(30.0);
+        physics.set_cooling(0.4);
+        physics.set_fluid_viscosity(1.0);
         physics.set_thermo(true);
         physics.spawn_container(Vector3::new(0.0, 0.0, 0.0), 2.4, 3.0);
         physics.spawn_fluid_block(Vector3::new(0.0, 1.1, 0.0), Vector3::new(2.25, 1.0, 2.25));
@@ -358,6 +386,7 @@ pub struct App {
     pub show_help: bool,
     pub help_page: usize,
     pub running: bool,
+    accumulator: Duration,
 }
 
 fn scene_camera(scene: Scene) -> Camera {
@@ -367,7 +396,7 @@ fn scene_camera(scene: Scene) -> Camera {
             camera.target = Vector3::new(0.0, 2.4, 0.0);
             camera.distance = 8.5;
         }
-        Scene::Thermal => {
+        Scene::Fluid | Scene::Thermal => {
             camera.target = Vector3::new(0.0, 1.0, 0.0);
             camera.distance = 12.0;
         }
@@ -403,7 +432,34 @@ impl App {
             show_help: false,
             help_page: 0,
             running: true,
+            accumulator: Duration::ZERO,
         }
+    }
+
+    /// Advance the simulation by real `elapsed` time, honoring pause, single-step,
+    /// time scale, and the fixed-timestep accumulator with a catch-up budget. Shared
+    /// by the desktop loop and the browser render callback.
+    pub fn tick(&mut self, elapsed: Duration) {
+        let physics_step = Duration::from_secs_f64(PHYSICS_DT);
+        if self.paused {
+            self.accumulator = Duration::ZERO;
+            if self.step_once {
+                self.physics.step(PHYSICS_DT);
+            }
+        } else {
+            self.accumulator += elapsed.mul_f64(self.time_scale);
+            self.accumulator = self.accumulator.min(physics_step * MAX_CATCHUP_STEPS);
+            let sim_start = Instant::now();
+            while self.accumulator >= physics_step {
+                self.physics.step(PHYSICS_DT);
+                self.accumulator -= physics_step;
+                if sim_start.elapsed() >= PHYSICS_BUDGET {
+                    self.accumulator = Duration::ZERO;
+                    break;
+                }
+            }
+        }
+        self.step_once = false;
     }
 
     pub fn toggle_pause(&mut self) {
@@ -589,7 +645,7 @@ impl App {
         }
     }
 
-    fn reconcile_grab(&mut self) {
+    pub(crate) fn reconcile_grab(&mut self) {
         let ui = self.grab.as_ref().map(|g| g.handle);
         let stale = ui.is_some_and(|h| !self.physics.contains(h));
         if ui != self.physics.dragging_handle() || stale {
@@ -635,9 +691,8 @@ impl App {
         self.active = target;
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
-        let physics_step = Duration::from_secs_f64(PHYSICS_DT);
-        let mut accumulator = Duration::ZERO;
         let mut last = Instant::now();
 
         while self.running {
@@ -645,25 +700,7 @@ impl App {
             let elapsed = frame_start - last;
             last = frame_start;
 
-            if self.paused {
-                accumulator = Duration::ZERO;
-                if self.step_once {
-                    self.physics.step(PHYSICS_DT);
-                }
-            } else {
-                accumulator += elapsed.mul_f64(self.time_scale);
-                accumulator = accumulator.min(physics_step * MAX_CATCHUP_STEPS);
-                let sim_start = Instant::now();
-                while accumulator >= physics_step {
-                    self.physics.step(PHYSICS_DT);
-                    accumulator -= physics_step;
-                    if sim_start.elapsed() >= PHYSICS_BUDGET {
-                        accumulator = Duration::ZERO;
-                        break;
-                    }
-                }
-            }
-            self.step_once = false;
+            self.tick(elapsed);
 
             terminal.draw(|frame| render::draw(frame, &mut self))?;
 
@@ -671,8 +708,8 @@ impl App {
             if event::poll(timeout)? {
                 loop {
                     match event::read()? {
-                        Event::Key(key) => input::handle_key(&mut self, key),
-                        Event::Mouse(mouse) => input::handle_mouse(&mut self, mouse),
+                        Event::Key(key) => input::handle_key(&mut self, key.into()),
+                        Event::Mouse(mouse) => input::handle_mouse(&mut self, mouse.into()),
                         _ => {}
                     }
                     if !event::poll(Duration::ZERO)? {
