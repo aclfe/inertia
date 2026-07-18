@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta
+      name="description"
+      content="Inertia: a real-time physics sandbox - rigid bodies, n-body gravity, cloth, fluid and thermal convection, projected in 3D onto braille. Runs entirely in the browser via WebAssembly."
+    />
+    <meta name="theme-color" content="#000000" />
+    <title>Inertia - a physics sandbox in your browser</title>
+
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cg fill='%23e6c84d'%3E%3Ccircle cx='11' cy='8' r='2.4'/%3E%3Ccircle cx='21' cy='8' r='2.4'/%3E%3Ccircle cx='11' cy='16' r='2.4'/%3E%3Ccircle cx='21' cy='16' r='2.4'/%3E%3Ccircle cx='11' cy='24' r='2.4'/%3E%3Ccircle cx='21' cy='24' r='2.4'/%3E%3C/g%3E%3C/svg%3E"
+    />
+
+<script type="module">
+import init, * as bindings from './inertia-tui-e457420252af5f03.js';
+const wasm = await init({ module_or_path: './inertia-tui-e457420252af5f03_bg.wasm' });
+
+window.wasmBindings = bindings;
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+
+      #inertia-screen {
+        width: 100vw;
+        height: 100vh;
+      }
+      #inertia-screen canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        outline: none;
+      }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        gap: 0;
+        background: #000;
+        color: #d7d7d7;
+        font: 500 15px/1.6 ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+          "Liberation Mono", monospace;
+        transition: opacity 0.5s ease;
+      }
+      #boot.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot .stack {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+      #boot .wordmark {
+        font-size: clamp(30px, 8vw, 68px);
+        font-weight: 700;
+        letter-spacing: 0.38em;
+        padding-left: 0.38em;
+        color: #f2f2f2;
+      }
+      #boot .tagline {
+        color: #6f6f6f;
+        letter-spacing: 0.04em;
+      }
+      #boot .spinner {
+        margin-top: 6px;
+        font-size: 22px;
+        color: #e6c84d;
+        min-height: 1.4em;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot .spinner::after {
+          content: "loading";
+          font-size: 14px;
+        }
+      }
+    </style>
+  <link rel="modulepreload" href="./inertia-tui-e457420252af5f03.js" crossorigin="anonymous" integrity="sha384-VActFLuByxSIrfPOgpuBkNxlGkDfXr+3kFwk1vJ428axmi/FtskF7XMDxprjhIql"><link rel="preload" href="./inertia-tui-e457420252af5f03_bg.wasm" crossorigin="anonymous" integrity="sha384-jxw+Ag/+W4yH1xbKnlfJF4F8mGfK/Gmi5gGxzAu4bcgORvu+PZPZqxsiREqqc2oL" as="fetch" type="application/wasm"></head>
+  <body>
+    <div id="inertia-screen"></div>
+
+    <div id="boot" role="status" aria-label="Loading Inertia">
+      <div class="stack">
+        <div class="wordmark">INERTIA</div>
+        <div class="tagline">a physics sandbox, compiled to your browser</div>
+        <div class="spinner" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const screen = document.getElementById("inertia-screen");
+        const boot = document.getElementById("boot");
+        const spinnerEl = boot.querySelector(".spinner");
+
+        const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frame = 0;
+        const spin = setInterval(() => {
+          spinnerEl.textContent = FRAMES[frame++ % FRAMES.length];
+        }, 90);
+
+        function focusCanvas() {
+          const canvas = screen.querySelector("canvas");
+          if (!canvas) return false;
+          if (!canvas.hasAttribute("tabindex")) canvas.setAttribute("tabindex", "0");
+          canvas.focus({ preventScroll: true });
+          return true;
+        }
+
+        function ready() {
+          focusCanvas();
+          clearInterval(spin);
+          boot.classList.add("hidden");
+          setTimeout(() => boot.remove(), 600);
+        }
+
+        if (screen.querySelector("canvas")) {
+          ready();
+        } else {
+          const observer = new MutationObserver(() => {
+            if (screen.querySelector("canvas")) {
+              observer.disconnect();
+              ready();
+            }
+          });
+          observer.observe(screen, { childList: true, subtree: true });
+        }
+
+        window.addEventListener("pointerdown", focusCanvas);
+
+        window.addEventListener(
+          "keydown",
+          (e) => {
+            if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+              e.preventDefault();
+            }
+          },
+          { passive: false }
+        );
+
+        screen.addEventListener("contextmenu", (e) => e.preventDefault());
+      })();
+    </script>
+  </body>
+</html>

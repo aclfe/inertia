@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inertia - a physics sandbox in your terminal</title>
+    <meta
+      name="description"
+      content="Inertia is a real-time physics sandbox that runs in your terminal and your browser: rigid bodies, n-body gravity, cloth, fluid, and thermal convection, projected in 3D onto braille with no GPU."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cg fill='%23e6c84d'%3E%3Ccircle cx='11' cy='8' r='2.4'/%3E%3Ccircle cx='21' cy='8' r='2.4'/%3E%3Ccircle cx='11' cy='16' r='2.4'/%3E%3Ccircle cx='21' cy='16' r='2.4'/%3E%3Ccircle cx='11' cy='24' r='2.4'/%3E%3Ccircle cx='21' cy='24' r='2.4'/%3E%3C/g%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap">
+        <a class="brand" href="#top" aria-label="Inertia home">
+          <svg class="dots" viewBox="0 0 16 24" fill="currentColor" aria-hidden="true">
+            <circle cx="4" cy="4" r="2.4" />
+            <circle cx="12" cy="4" r="2.4" />
+            <circle cx="4" cy="12" r="2.4" />
+            <circle cx="12" cy="12" r="2.4" />
+            <circle cx="4" cy="20" r="2.4" />
+            <circle cx="12" cy="20" r="2.4" />
+          </svg>
+          INERTIA
+        </a>
+        <nav class="nav">
+          <a href="#gallery">Simulations</a>
+          <a href="#run">Install</a>
+          <a href="https://github.com/aclfe/inertia">GitHub</a>
+          <a class="btn btn-primary" href="demo/">Launch demo</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <div class="wrap">
+        <section class="hero" style="border-top: 0">
+          <div class="eyebrow">Rust &middot; rapier3d &middot; renders to braille</div>
+          <h1>A physics sandbox in your terminal.</h1>
+          <p class="lede">
+            Inertia simulates rigid bodies, orbital gravity, cloth, fluid, and heat in full
+            3D, then draws the whole scene with Unicode braille. No GPU, no window server.
+            The same engine now compiles to WebAssembly, so it runs in your browser too.
+          </p>
+          <div class="cta">
+            <a class="btn btn-primary" href="demo/">Launch the demo &rarr;</a>
+            <a class="btn btn-ghost" href="https://github.com/aclfe/inertia">View source</a>
+            <span class="install">
+              <code><span class="prompt">$</span>cargo install inertia-tui</code>
+              <button class="copy" type="button" data-copy="cargo install inertia-tui">
+                Copy
+              </button>
+            </span>
+          </div>
+          <div class="badges">
+            <span class="badge">Rust</span>
+            <span class="badge">WebAssembly</span>
+            <span class="badge">60 fps</span>
+            <span class="badge dark">No GPU</span>
+            <span class="badge dark">MIT / Apache-2.0</span>
+          </div>
+        </section>
+      </div>
+
+      <div class="wrap">
+        <div class="featured">
+          <figure class="screen" style="margin: 0">
+            <div class="bar">
+              <i></i><i></i><i></i>
+              <span class="title">inertia</span>
+            </div>
+            <img
+              src="img/menu.png"
+              width="1280"
+              height="800"
+              alt="The Inertia start screen listing six demos: blank sandbox, rigid, n-body, cloth, fluid, and thermal."
+            />
+          </figure>
+        </div>
+      </div>
+
+      <div class="wrap">
+        <section id="about">
+          <div class="cols">
+            <div class="prose">
+              <h2>Real physics, drawn in text.</h2>
+              <p>
+                Inertia is a real-time playground that lives entirely inside a terminal.
+                Every solid, particle, and spring is simulated in three dimensions and
+                rasterized with braille glyphs, so each character cell doubles as a 2&times;4
+                block of pixels. The result is a smooth, shaded 3D scene made of nothing but
+                text.
+              </p>
+              <p>
+                Rigid-body dynamics run on <em>rapier3d</em>; the n-body gravity, mass-spring
+                cloth, smoothed-particle fluid, and the temperature field on top of it are
+                built from scratch. You orbit the camera, spawn and throw objects, pour water,
+                heat things up, and watch it all settle, sixty times a second.
+              </p>
+              <p>
+                Because the engine is plain Rust, it also compiles to WebAssembly and renders
+                to a canvas through <em>ratzilla</em>. Every demo below is the exact terminal
+                program, running in the browser.
+              </p>
+            </div>
+            <aside class="aside">
+              <h3>At a glance</h3>
+              <ul class="facts">
+                <li><span class="k">Language</span><span class="v">Rust</span></li>
+                <li><span class="k">Rigid bodies</span><span class="v">rapier3d</span></li>
+                <li><span class="k">Renderer</span><span class="v">braille / ratatui</span></li>
+                <li><span class="k">In the browser</span><span class="v">ratzilla / wasm</span></li>
+                <li><span class="k">License</span><span class="v">MIT / Apache-2.0</span></li>
+              </ul>
+              <ul class="linklist">
+                <li>
+                  <a href="https://github.com/aclfe/inertia"
+                    ><span class="arw">&rarr;</span> Source on GitHub</a
+                  >
+                </li>
+                <li>
+                  <a href="https://crates.io/crates/inertia-tui"
+                    ><span class="arw">&rarr;</span> inertia-tui on crates.io</a
+                  >
+                </li>
+                <li>
+                  <a href="https://github.com/aclfe/inertia#readme"
+                    ><span class="arw">&rarr;</span> Read the README</a
+                  >
+                </li>
+              </ul>
+            </aside>
+          </div>
+        </section>
+
+        <section id="gallery">
+          <div class="section-head">
+            <div class="kicker">The simulations</div>
+            <h2>Six sandboxes, one engine.</h2>
+            <p>
+              Five open on a preset scene; the sixth starts empty. Launch any of them in the
+              browser, then take the controls: orbit the camera, spawn objects, and push the
+              parameters around.
+            </p>
+          </div>
+
+          <div class="gallery">
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the rigid bodies demo">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/rigid.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="A ball mid-flight through a collapsing pyramid of braille boxes on a grid floor."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>Rigid bodies</h3>
+                  <span class="tag">rapier3d</span>
+                </div>
+                <p>
+                  A ball is launched into a pyramid of boxes. Friction, restitution, and
+                  stacking, solved in real time.
+                </p>
+              </div>
+            </article>
+
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the n-body gravity demo">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/nbody.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="Three stars tracing a figure-eight orbit with glowing trails."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>N-body gravity</h3>
+                  <span class="tag">brute-force / Barnes-Hut</span>
+                </div>
+                <p>
+                  Three stars trace a figure-eight in mutual gravitation, leaving orbital
+                  trails behind them.
+                </p>
+              </div>
+            </article>
+
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the cloth demo">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/cloth.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="A hanging braille cloth hammock sagging under two dropped balls."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>Cloth</h3>
+                  <span class="tag">mass-spring</span>
+                </div>
+                <p>
+                  A hammock of springs stretches and swings as two balls drop into it. Pin it
+                  up, blow wind through it.
+                </p>
+              </div>
+            </article>
+
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the fluid demo">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/fluid.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="A tank of blue braille water with a red ball and a yellow box floating in it."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>Fluid</h3>
+                  <span class="tag">SPH</span>
+                </div>
+                <p>
+                  Thousands of smoothed particles splash and settle into a tank, buoying the
+                  debris that lands in them.
+                </p>
+              </div>
+            </article>
+
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the thermal convection demo">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/thermal.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="Water in a tank colored by temperature, warm plumes rising from a hot floor."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>Thermal convection</h3>
+                  <span class="tag">heat transfer</span>
+                </div>
+                <p>
+                  A hot floor warms the water above it. Buoyant plumes rise and cool, shaded by
+                  temperature.
+                </p>
+              </div>
+            </article>
+
+            <article class="card">
+              <a class="shot" href="demo/" aria-label="Launch the blank sandbox">
+                <figure class="screen" style="margin: 0">
+                  <img
+                    src="img/sandbox.png"
+                    width="1280"
+                    height="800"
+                    loading="lazy"
+                    alt="A blank sandbox with ten boxes and spheres dropped onto the grid floor."
+                  />
+                </figure>
+              </a>
+              <div class="meta">
+                <div class="row">
+                  <h3>Blank sandbox</h3>
+                  <span class="tag">build your own</span>
+                </div>
+                <p>
+                  Start from nothing. Drop boxes and spheres, switch gravity to n-body, add
+                  cloth and water, and mix the systems however you like.
+                </p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="run">
+          <div class="section-head">
+            <div class="kicker">Get it running</div>
+            <h2>In the browser, or in your shell.</h2>
+          </div>
+          <div class="run-grid">
+            <div>
+              <div class="step">
+                <h3>Install from crates.io</h3>
+                <p>Needs a recent Rust toolchain. The crate is published as inertia-tui; the installed command is inertia.</p>
+                <pre class="code"><span class="prompt">$</span> cargo install inertia-tui
+<span class="prompt">$</span> inertia</pre>
+              </div>
+              <div class="step">
+                <h3>Build the browser demo</h3>
+                <p>
+                  The web build uses <a href="https://trunkrs.dev">trunk</a> and the
+                  <code>wasm32-unknown-unknown</code> target. Point trunk at this site's
+                  <code>demo/</code> folder and the Launch buttons light up.
+                </p>
+                <pre class="code"><span class="prompt">$</span> rustup target add wasm32-unknown-unknown
+<span class="prompt">$</span> trunk build --release --dist site/demo</pre>
+              </div>
+            </div>
+
+            <div>
+              <h3 style="margin-bottom: 14px">Controls</h3>
+              <div class="keys">
+                <div class="krow">
+                  <span class="keycombo">Arrow keys</span><span class="desc">Orbit the camera</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">Shift + arrows</span><span class="desc">Pan across the scene</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">+ / -</span><span class="desc">Zoom in and out</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">Left drag</span><span class="desc">Grab an object and throw it</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">b &middot; s &middot; n</span><span class="desc">Spawn a box, sphere, or star</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">d</span><span class="desc">Cycle tool: place, grab, pour, heat, build</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">Space</span><span class="desc">Pause, then m to step one frame</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">1 &ndash; 6</span><span class="desc">Switch between the sandboxes</span>
+                </div>
+                <div class="krow">
+                  <span class="keycombo">? &middot; q</span><span class="desc">Full help, and quit</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>Inertia &middot; MIT / Apache-2.0 &middot; built by Kairav Mittal</span>
+        <span class="flinks">
+          <a href="https://github.com/aclfe/inertia">GitHub</a>
+          <a href="https://crates.io/crates/inertia-tui">crates.io</a>
+          <a href="demo/">Launch demo</a>
+        </span>
+      </div>
+    </footer>
+
+    <script>
+      document.querySelectorAll(".copy").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            const prev = btn.textContent;
+            btn.textContent = "Copied";
+            btn.classList.add("copied");
+            setTimeout(() => {
+              btn.textContent = prev;
+              btn.classList.remove("copied");
+            }, 1400);
+          } catch (e) {}
+        });
+      });
+    </script>
+  </body>
+</html>
