@@ -1,0 +1,4 @@
+# getrandom 0.3 needs its backend chosen explicitly for wasm32-unknown-unknown
+# (browsers have no /dev/urandom). Pulled in transitively via rand / hashbrown.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

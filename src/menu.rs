@@ -1,8 +1,12 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::io;
 
+#[cfg(not(target_arch = "wasm32"))]
 use ratatui::DefaultTerminal;
-use ratatui::Frame;
+#[cfg(not(target_arch = "wasm32"))]
 use ratatui::crossterm::event::{self, Event, KeyCode};
+
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -10,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::Scene;
 
-const OPTIONS: [(&str, &str, Scene); 5] = [
+pub const OPTIONS: [(&str, &str, Scene); 6] = [
     (
         "Blank sandbox",
         "start empty and spawn objects yourself",
@@ -32,12 +36,18 @@ const OPTIONS: [(&str, &str, Scene); 5] = [
         Scene::Cloth,
     ),
     (
+        "Fluid demo",
+        "a splash cascade into a rectangular tank",
+        Scene::Fluid,
+    ),
+    (
         "Thermal demo",
         "a hot floor drives convection in a tank of water",
         Scene::Thermal,
     ),
 ];
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn choose_scene(terminal: &mut DefaultTerminal) -> io::Result<Option<Scene>> {
     let mut cursor = 0usize;
     loop {
@@ -60,7 +70,7 @@ pub fn choose_scene(terminal: &mut DefaultTerminal) -> io::Result<Option<Scene>>
     }
 }
 
-fn draw(frame: &mut Frame, cursor: usize) {
+pub fn draw(frame: &mut Frame, cursor: usize) {
     let mut lines = vec![
         Line::from("INERTIA".bold()),
         Line::from("a terminal physics sandbox".dim()),
@@ -80,7 +90,7 @@ fn draw(frame: &mut Frame, cursor: usize) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(
-        "up/down: move   1-5: pick   enter: start   q: quit".dim(),
+        "up/down: move   1-6: pick   enter: start   q: quit".dim(),
     ));
 
     let height = lines.len() as u16 + 2;

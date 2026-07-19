@@ -17,10 +17,27 @@ name = "inertia"
 path = "src/main.rs"
 
 [dependencies]
-ratatui = "0.30.2"
 nalgebra = "0.33"
 rand = "0.9"
 rapier3d = "0.33"
+# Portable clock: re-exports std Instant/Duration on native, backs Instant with
+# performance.now() on wasm so the shared engine builds for the browser too.
+web-time = "1"
+
+# Desktop: ratatui with its default crossterm backend and terminal I/O.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ratatui = "0.30.2"
+
+# Browser: ratatui without crossterm (which does not compile to wasm), driven by
+# ratzilla's canvas backend. getrandom needs its browser backend for rand/hashbrown.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ratatui = { version = "0.30.2", default-features = false }
+ratzilla = "0.3"
+getrandom = { version = "0.3", features = ["wasm_js"] }
+console_error_panic_hook = "0.1"
+# ratatui-core uses critical-section; on single-core wasm no impl is linked by
+# default, so pick the std-backed one to resolve the acquire/release symbols.
+critical-section = { version = "1", features = ["std"] }
 
 [profile.dev]
 opt-level = 1

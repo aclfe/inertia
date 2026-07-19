@@ -562,7 +562,7 @@ impl Fluid {
         };
         let nbr = &mut self.nbr;
         let count = &mut self.nbr_count;
-        if n < PAR_MIN {
+        if n < PAR_MIN || threads <= 1 {
             for i in 0..n {
                 count[i] = one(i, &mut nbr[i * MAX_NBR..(i + 1) * MAX_NBR]);
             }
@@ -606,7 +606,7 @@ impl Fluid {
         };
         let density = &mut self.density;
         let pressure = &mut self.pressure;
-        if n < PAR_MIN {
+        if n < PAR_MIN || threads <= 1 {
             for i in 0..n {
                 (density[i], pressure[i]) = one(i);
             }
@@ -660,7 +660,7 @@ impl Fluid {
             f_pressure + f_viscosity
         };
         let forces = &mut self.forces;
-        if n < PAR_MIN {
+        if n < PAR_MIN || threads <= 1 {
             for (i, f) in forces.iter_mut().enumerate() {
                 *f = one(i);
             }

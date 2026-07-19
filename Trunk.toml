@@ -1,0 +1,10 @@
+[build]
+target = "index.html"
+# Relative asset URLs so the built site works under any path, including a GitHub
+# Pages project subpath like username.github.io/inertia/. Absolute URLs (the
+# default) would resolve to the domain root there and 404.
+public_url = "./"
+
+[serve]
+port = 8080
+open = true
