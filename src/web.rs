@@ -36,9 +36,8 @@ pub fn run() {
 
     let screen = Rc::new(RefCell::new(Screen::Menu(0)));
 
-    let backend =
-        CanvasBackend::new_with_options(CanvasBackendOptions::new().grid_id(SCREEN_ID))
-            .expect("create canvas backend");
+    let backend = CanvasBackend::new_with_options(CanvasBackendOptions::new().grid_id(SCREEN_ID))
+        .expect("create canvas backend");
     let mut terminal = Terminal::new(backend).expect("create terminal");
 
     // ratzilla has no Drag event; it emits Moved while a button is held. Track the
@@ -131,7 +130,10 @@ fn to_key(ev: RKeyEvent) -> KeyInput {
         RKeyCode::Tab => Key::Tab,
         _ => Key::Other,
     };
-    KeyInput { key, shift: ev.shift }
+    KeyInput {
+        key,
+        shift: ev.shift,
+    }
 }
 
 fn to_button(b: RMouseButton) -> Option<Button> {

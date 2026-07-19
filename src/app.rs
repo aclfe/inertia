@@ -5,18 +5,18 @@ use nalgebra::Vector3;
 use rapier3d::prelude::RigidBodyHandle;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io;
+use crate::input;
 #[cfg(not(target_arch = "wasm32"))]
 use ratatui::DefaultTerminal;
 #[cfg(not(target_arch = "wasm32"))]
 use ratatui::crossterm::event::{self, Event};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::input;
+use std::io;
 
 use crate::physics::{FloorMode, GravityMode, NBodyAlgo, PhysicsWorld, SpawnKind};
-use crate::render::{ColorMode, Layout3D, camera::Camera, projection::Projection};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render;
+use crate::render::{ColorMode, Layout3D, camera::Camera, projection::Projection};
 
 const PHYSICS_DT: f64 = 1.0 / 60.0;
 #[cfg(not(target_arch = "wasm32"))]

@@ -19,9 +19,12 @@ pub fn handle_key(app: &mut App, key: KeyInput) {
             Key::Char('?') | Key::Char('h') | Key::Esc | Key::Char('q') => {
                 app.show_help = false;
             }
-            Key::Tab | Key::Char(' ') | Key::Left | Key::Right | Key::Char('n') | Key::Char('p') => {
-                app.flip_help_page()
-            }
+            Key::Tab
+            | Key::Char(' ')
+            | Key::Left
+            | Key::Right
+            | Key::Char('n')
+            | Key::Char('p') => app.flip_help_page(),
             _ => {}
         }
         return;
