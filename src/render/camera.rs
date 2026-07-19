@@ -13,6 +13,12 @@ pub struct Camera {
     pub target: Vector3<f64>,
 }
 
+impl Default for Camera {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Camera {
     pub fn new() -> Self {
         Self {

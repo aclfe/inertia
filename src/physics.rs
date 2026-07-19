@@ -181,6 +181,12 @@ struct Container {
     interior: (Vector3<f64>, Vector3<f64>),
 }
 
+impl Default for PhysicsWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PhysicsWorld {
     pub fn new() -> Self {
         let mut bodies = RigidBodySet::new();
@@ -1313,6 +1319,10 @@ impl PhysicsWorld {
 
     pub fn len(&self) -> usize {
         self.order.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
     }
 
     pub fn handles(&self) -> impl Iterator<Item = RigidBodyHandle> + '_ {
